@@ -1,20 +1,21 @@
 # @cachly-dev/openclaw
 
-> Official **cachly.dev** adapter for [OpenClaw](https://openclaw.dev) – the personal AI assistant.  
-> Persistent sessions · Semantic LLM cache · Redis memory storage
+> Official **cachly.dev** adapter for [OpenClaw](https://openclaw.dev) — the 22-channel AI assistant.  
+> Persistent sessions · Semantic LLM cache · Redis-native memory · EU data residency
 
-[![npm](https://img.shields.io/npm/v/@cachly-dev/openclaw?color=red)](https://www.npmjs.com/package/@cachly-dev/openclaw)
+[![npm](https://img.shields.io/npm/v/@cachly-dev/openclaw?color=red&logo=npm)](https://www.npmjs.com/package/@cachly-dev/openclaw)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
+[![GDPR: EU-only](https://img.shields.io/badge/GDPR-EU%20only-green)](https://cachly.dev/legal)
 
 ---
 
 ## What it provides
 
-| Feature | Description | Savings |
-|---------|-------------|---------|
-| 🗄️ **Session Store** | Persistent Redis-backed conversation sessions | No cold starts |
-| 🧠 **Semantic LLM Cache** | Cache LLM responses by meaning (pgvector HNSW) | 50–70% cost reduction |
-| 💾 **Memory Adapter** | Redis + pgvector replaces LanceDB for long-term memory | EU data residency |
+| Feature | Description | Impact |
+|---------|-------------|--------|
+| 🗄️ **Session Store** | Persistent Redis-backed conversation sessions | No cold starts, no lost history |
+| 🧠 **Semantic LLM Cache** | Cache LLM responses by meaning (pgvector HNSW) | 50–70 % cost reduction |
+| 💾 **Memory Adapter** | Redis + pgvector replaces LanceDB for long-term memory | EU data residency, Redis-native |
 
 ---
 
@@ -25,11 +26,11 @@ npm install @cachly-dev/openclaw
 ```
 
 > **Peer dependency:** `openclaw >= 2026.1.0`  
-> **Requires:** A cachly.dev instance – free tier at [cachly.dev](https://cachly.dev)
+> **Requires:** A cachly.dev instance — free tier at [cachly.dev](https://cachly.dev)
 
 ---
 
-## Quick start
+## Quick Start
 
 ```typescript
 import { createCachlyOpenClawConfig } from '@cachly-dev/openclaw'
@@ -51,7 +52,6 @@ const cachlyConfig = createCachlyOpenClawConfig({
   },
 })
 
-// Use in your OpenClaw app:
 const app = new OpenClawApp({
   ...cachlyConfig,
   // ... your other config
@@ -60,7 +60,7 @@ const app = new OpenClawApp({
 
 ---
 
-## Individual adapters
+## Individual Adapters
 
 ### Session Store
 
@@ -74,7 +74,7 @@ const sessionStore = createCachlySessionStore({
   ttl: 604800, // 7 days
 })
 
-// Used automatically by OpenClaw – no manual calls needed.
+// Used automatically by OpenClaw — no manual calls needed.
 ```
 
 ### Semantic LLM Cache
@@ -88,16 +88,15 @@ const llmCache = createSemanticLLMCache({
   url:       process.env.CACHLY_URL!,
   vectorUrl: process.env.CACHLY_VECTOR_URL!,
   embedFn:   myEmbedFn,
-  threshold: 0.92,     // similarity threshold (default: 0.92)
-  ttl:       3600,     // cache TTL in seconds
-  skipPatterns: [      // never cache these
+  threshold: 0.92,    // similarity threshold (default: 0.92)
+  ttl:       3600,    // cache TTL in seconds
+  skipPatterns: [     // never cache these
     'generate image',
     'draw',
     'real-time',
   ],
 })
 
-// Wrap your LLM calls:
 const response = await llmCache.getOrSet(
   'What is semantic caching?',
   () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })
@@ -106,7 +105,7 @@ const response = await llmCache.getOrSet(
 
 ### Memory Adapter
 
-Replaces LanceDB with Redis + pgvector for EU-compliant, Redis-native memory:
+Replaces LanceDB with Redis + pgvector for EU-compliant, Redis-native long-term memory:
 
 ```typescript
 import { createCachlyMemoryAdapter } from '@cachly-dev/openclaw'
@@ -125,27 +124,49 @@ const results = await memory.search('programming language preference', { topK: 5
 
 ---
 
-## Auth & Security
+## AI Dev Brain — Persistent Memory for Your Coding Assistant
 
-cachly uses **Keycloak** (self-hosted OIDC) for authentication.  
-Your Redis password and vector token are scoped per-instance and never shared.
-
-```bash
-# Get your instance URL from the cachly.dev dashboard:
-CACHLY_URL=redis://:your-password@your-instance.cachly.dev:6379
-CACHLY_VECTOR_URL=https://api.cachly.dev/v1/sem/your-vector-token
-```
-
----
-
-## Development
+cachly ships a **30-tool MCP server** that gives Claude Code, Cursor, GitHub Copilot, and Windsurf a persistent memory across sessions — so they never forget your architecture, lessons learned, or last session context.
 
 ```bash
-npm install
-npm run build        # tsc
-npm test             # vitest
-npm run typecheck    # tsc --noEmit
+# One-time setup
+npx @cachly-dev/init
 ```
+
+Or configure manually in your editor (`~/.vscode/mcp.json` / `.cursor/mcp.json`):
+
+```json
+{
+  "servers": {
+    "cachly": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@cachly-dev/mcp-server"],
+      "env": { "CACHLY_JWT": "your-jwt-token" }
+    }
+  }
+}
+```
+
+Add to your AI assistant instructions (e.g. `.github/copilot-instructions.md`):
+
+```markdown
+## cachly AI Brain
+
+At the START of every session:
+session_start(instance_id = "your-instance-id", focus = "what you're working on today")
+
+At the END of every session:
+session_end(instance_id = "your-instance-id", summary = "...", files_changed = [...])
+
+After any bug fix or deploy:
+learn_from_attempts(instance_id = "your-instance-id", topic = "category:keyword",
+  outcome = "success", what_worked = "...", what_failed = "...", severity = "major")
+```
+
+`session_start` returns a full briefing in **one call**: last session summary, relevant lessons, open failures, brain health. 60 % fewer file reads, instant context, zero re-discovery.
+
+→ Full docs: [cachly.dev/docs/ai-memory](https://cachly.dev/docs/ai-memory)
 
 ---
 
@@ -153,9 +174,7 @@ npm run typecheck    # tsc --noEmit
 
 ### 1. WhatsApp Customer Support Bot with Memory
 
-**Problem:** Your customers message you on WhatsApp, but every conversation starts from scratch. No context, no history.
-
-**Solution:** OpenClaw + cachly = WhatsApp bot with persistent semantic memory.
+Every conversation starts from scratch — no context, no history. OpenClaw + cachly = a bot that remembers.
 
 ```typescript
 import { OpenClaw } from '@cachly-dev/openclaw'
@@ -168,32 +187,26 @@ const bot = new OpenClaw({
 })
 
 bot.on('message', async (msg) => {
-  // Check semantic cache: has a similar question been answered before?
+  // Check semantic cache — has a similar question been answered before?
   const cached = await bot.memory.recall(msg.text, { threshold: 0.85 })
-  if (cached) {
-    return msg.reply(cached.response)  // instant, free
-  }
+  if (cached) return msg.reply(cached.response)  // instant, free
 
-  // Generate fresh response
   const response = await llm.complete(msg.text, {
     context: await bot.memory.getHistory(msg.userId, { limit: 10 }),
   })
 
-  // Cache for future similar questions
   await bot.memory.store(msg.text, response)
   return msg.reply(response)
 })
 ```
 
-**Impact:** A support bot handling 500 messages/day with 65% cache hit rate saves ~€200/month in LLM costs.
+**Impact:** 500 messages/day at 65 % cache hit rate → ~€200/month saved in LLM costs.
 
 ---
 
-### 2. Slack AI Assistant for Engineering Teams
+### 2. Slack Knowledge Bot for Engineering Teams
 
-**Problem:** Your engineering team asks the same DevOps/infrastructure questions repeatedly in Slack. "How do I deploy to staging?" gets asked every week.
-
-**Solution:** OpenClaw bot in Slack with semantic cache for tribal knowledge.
+"How do I deploy to staging?" gets asked every week. Cache the answers — instant tribal knowledge.
 
 ```typescript
 const bot = new OpenClaw({
@@ -211,17 +224,14 @@ await bot.memory.batchIndex([
   { prompt: 'How to access production logs', response: 'Use `kubectl logs`...' },
 ])
 
-// Now when someone asks "how do I push to staging?"
-// → Semantic match (0.91 similarity) → instant answer from cache
+// "how do I push to staging?" → semantic match (0.91 similarity) → instant answer
 ```
 
 ---
 
 ### 3. Multi-Channel FAQ Bot (WhatsApp + Telegram + Discord)
 
-**Problem:** You have customers on 3 different platforms asking the same questions. Maintaining 3 separate bots is painful.
-
-**Solution:** One OpenClaw bot, 3 channels, one shared semantic cache.
+One OpenClaw bot, three channels, one shared semantic cache. A question answered on WhatsApp instantly benefits Telegram and Discord users.
 
 ```typescript
 const bot = new OpenClaw({
@@ -231,19 +241,14 @@ const bot = new OpenClaw({
   embedFn: openaiEmbed,
 })
 
-// A question answered on WhatsApp instantly benefits Telegram + Discord users
-// Same semantic cache, same knowledge, zero duplication
+// Same semantic cache, same knowledge, zero duplication across channels
 ```
-
-**Result:** Consistent answers across all channels. One LLM call serves all platforms.
 
 ---
 
-### 4. Personal AI Journal / Diary Bot (Telegram)
+### 4. Personal AI Journal (Telegram)
 
-**Problem:** You want an AI companion that remembers your conversations, goals, and moods across months — not just one session.
-
-**Solution:** OpenClaw Telegram bot with long-term semantic memory.
+An AI companion that remembers your conversations, goals, and moods across months — not just one session.
 
 ```typescript
 const journal = new OpenClaw({
@@ -255,14 +260,11 @@ const journal = new OpenClaw({
 })
 
 journal.on('message', async (msg) => {
-  // Store every entry with semantic embedding
   await journal.memory.store(msg.text, msg.text, {
     namespace: `journal:${msg.userId}`,
     ttl: 0,  // never expire
   })
 
-  // "What was I stressed about last month?"
-  // → Semantic search across all journal entries → relevant context
   const related = await journal.memory.recall(msg.text, {
     namespace: `journal:${msg.userId}`,
     threshold: 0.75,
@@ -274,25 +276,26 @@ journal.on('message', async (msg) => {
 
 ---
 
-### 5. E-Commerce Order Tracking Bot (iMessage + Teams)
+## Auth & Security
 
-**Problem:** Customers ask "Where's my order?" on different channels. Each lookup requires a database query + LLM formatting.
+cachly uses **Keycloak** (self-hosted OIDC) for authentication. Your Redis password and vector token are scoped per instance and never shared.
 
-**Solution:** Cache order status responses by similarity. "Where's order #42?" and "Track my order forty-two" both hit the same cache.
+```bash
+CACHLY_URL=redis://:your-password@your-instance.cachly.dev:6379
+CACHLY_VECTOR_URL=https://api.cachly.dev/v1/sem/your-vector-token
+```
 
-```typescript
-const orderBot = new OpenClaw({
-  channels: ['imessage', 'teams'],
-  cachlyUrl: process.env.CACHLY_URL,
-  vectorUrl: process.env.CACHLY_VECTOR_URL,
-  embedFn: openaiEmbed,
-  namespace: 'order-tracking',
-})
+Get your credentials at [cachly.dev/instances](https://cachly.dev/instances).
 
-// Cache order responses with short TTL (status changes)
-// "Where's my order #42?" → DB lookup + format → cache (TTL: 300s)
-// "What's the status of order 42?" → cache HIT (similarity: 0.94)
-// After 5 minutes → cache expires → fresh DB lookup
+---
+
+## Development
+
+```bash
+npm install
+npm run build     # tsc
+npm test          # vitest
+npm run typecheck # tsc --noEmit
 ```
 
 ---
@@ -300,6 +303,11 @@ const orderBot = new OpenClaw({
 ## Links
 
 - 📖 [cachly.dev docs](https://cachly.dev/docs/openclaw)
+- 🧠 [AI Memory / MCP Server](https://cachly.dev/docs/ai-memory)
 - 🔧 [OpenClaw](https://openclaw.dev)
 - 🐛 [Issues](https://github.com/cachly-dev/sdk-js/issues)
+- 📦 [npm](https://www.npmjs.com/package/@cachly-dev/openclaw)
 
+---
+
+MIT © [cachly.dev](https://cachly.dev)
