@@ -13,8 +13,9 @@
 
 | Feature | Description | Impact |
 |---------|-------------|--------|
+| 🧠 **Brain Bridge** | Share the *same* compounding lesson store as Claude Code, Cursor & the IDE plugins | Cross-tool memory — your assistant arrives pre-briefed |
 | 🗄️ **Session Store** | Persistent Redis-backed conversation sessions | No cold starts, no lost history |
-| 🧠 **Semantic LLM Cache** | Cache LLM responses by meaning (pgvector HNSW) | 50–70 % cost reduction |
+| ⚡ **Semantic LLM Cache** | Cache LLM responses by meaning (pgvector HNSW) | 50–70 % cost reduction |
 | 💾 **Memory Adapter** | Redis + pgvector replaces LanceDB for long-term memory | EU data residency, Redis-native |
 
 ---
@@ -61,6 +62,50 @@ const app = new OpenClawApp({
 ---
 
 ## Individual Adapters
+
+### 🧠 Brain Bridge
+
+The session store, cache, and memory adapter are commodity infrastructure. The
+**Brain** is what makes Cachly different: a persistent, compounding store of
+*lessons* — "this fix worked", "that approach failed" — that your instance
+already collects from Claude Code, Cursor, Copilot, and the VS Code / IntelliJ
+plugins.
+
+The Brain Bridge lets your OpenClaw agents read from and write to that **same**
+Brain. Your assistant arrives pre-briefed with what every other tool has already
+learned, and anything it discovers flows back so the next session — in any tool —
+benefits.
+
+```typescript
+import { createCachlyBrain } from '@cachly-dev/openclaw/brain'
+
+const brain = createCachlyBrain({ url: process.env.CACHLY_URL! })
+
+// 1) Auto pre-brief every LLM call with relevant lessons (chain before the cache):
+export default {
+  llmMiddleware: brain.briefingMiddleware(),
+}
+
+// 2) …or use it directly inside a skill:
+const lessons = await brain.recall('deploy to fly.io')
+// → [{ lesson: { topic: 'deploy:fly-io', whatWorked: 'set min_machines_running=1 …' }, score: 0.5 }]
+
+await brain.learn({
+  topic: 'deploy:fly-io',
+  outcome: 'success',
+  whatWorked: 'set min_machines_running=1 to avoid cold-start 502s',
+  severity: 'major',
+  tags: ['deploy', 'fly'],
+})
+```
+
+`learn()` calibrates confidence exactly like the rest of Cachly: a matching
+outcome reinforces a lesson (+0.1, capped 0.99), a flipped outcome erodes it
+(−0.15) and overwrites the guidance. `recall()` ranks by keyword relevance and
+bumps `recall_count` so cross-tool telemetry stays accurate — **no embeddings
+required**, so it works on every tier.
+
+---
 
 ### Session Store
 

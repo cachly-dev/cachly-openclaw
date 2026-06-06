@@ -27,6 +27,16 @@ export type { LLMMiddleware, LLMRequest, LLMResponse, SemanticLLMCacheOptions, E
 export { createCachlyMemoryAdapter } from './memory-adapter.js';
 export type { IMemoryStorage, MemoryEntry, MemorySearchResult, CachlyMemoryAdapterOptions } from './memory-adapter.js';
 
+export { createCachlyBrain, CachlyBrain } from './brain.js';
+export type {
+  CachlyBrainOptions,
+  BrainLesson,
+  BrainRecallResult,
+  LearnInput,
+  LessonOutcome,
+  LessonSeverity,
+} from './brain.js';
+
 // ── Convenience: createCachlyOpenClawConfig ───────────────────────────────────
 
 import { createCachlySessionStore } from './session-store.js';

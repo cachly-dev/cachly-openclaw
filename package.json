@@ -1,7 +1,7 @@
 {
   "name": "@cachly-dev/openclaw",
-  "version": "0.1.0",
-  "description": "Official Cachly adapter for OpenClaw – persistent sessions, semantic LLM cache, memory storage, and cost tracking",
+  "version": "0.3.0",
+  "description": "Official Cachly adapter for OpenClaw – shared compounding Brain, persistent sessions, semantic LLM cache, memory storage, and cost tracking",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,6 +21,10 @@
     "./memory-adapter": {
       "types": "./dist/memory-adapter.d.ts",
       "default": "./dist/memory-adapter.js"
+    },
+    "./brain": {
+      "types": "./dist/brain.d.ts",
+      "default": "./dist/brain.js"
     }
   },
   "scripts": {
@@ -37,7 +41,10 @@
     "redis",
     "llm",
     "semantic-cache",
-    "session"
+    "session",
+    "ai-memory",
+    "brain",
+    "persistent-memory"
   ],
   "dependencies": {
     "ioredis": "^5.4.1"
