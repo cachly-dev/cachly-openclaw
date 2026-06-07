@@ -1,14 +1,15 @@
 name: Publish to npm
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -21,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
 
@@ -28,15 +32,39 @@ jobs:
         id: check
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
-          if npm view @cachly-dev/openclaw@${PKG_VERSION} version 2>/dev/null; then
+          echo "version=$PKG_VERSION" >> $GITHUB_OUTPUT
+          if npm view "@cachly-dev/openclaw@${PKG_VERSION}" version &>/dev/null; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Version ${PKG_VERSION} already published, skipping."
+            echo "Version ${PKG_VERSION} already published — skipping."
           else
             echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Version ${PKG_VERSION} is new — will publish."
           fi
+
+      - name: Extract CHANGELOG notes
+        if: steps.check.outputs.skip == 'false'
+        id: changelog
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          NOTES=$(awk "/^## \[?${VERSION}\]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md | sed '/^[[:space:]]*$/d' | head -60)
+          if [ -z "$NOTES" ]; then
+            NOTES="See [CHANGELOG.md](https://github.com/cachly-dev/cachly-openclaw/blob/main/CHANGELOG.md) for details."
+          fi
+          echo "$NOTES" > /tmp/release-notes.md
 
       - name: Publish to npm
         if: steps.check.outputs.skip == 'false'
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes-file /tmp/release-notes.md \
+            --latest
