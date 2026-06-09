@@ -93,6 +93,62 @@ describe("CachlyBrain.recall", () => {
     const results = await brain.recall("cache tip", { topK: 3 });
     expect(results).toHaveLength(3);
   });
+
+  it("ranks a proven lesson above an eroded one at equal keyword overlap", async () => {
+    // Identical searchable text → identical keyword relevance. Confidence breaks
+    // the tie: the discredited lesson (0.05) must sink below the proven one.
+    seed("deploy:proven", {
+      outcome: "success",
+      what_worked: "redis cache warmup fixes cold start",
+      tags: ["redis", "cache"],
+      confidence: 0.97,
+    });
+    seed("deploy:eroded", {
+      outcome: "success",
+      what_worked: "redis cache warmup fixes cold start",
+      tags: ["redis", "cache"],
+      confidence: 0.05,
+    });
+    const brain = createCachlyBrain({ url: URL });
+    const results = await brain.recall("redis cache warmup cold start");
+    expect(results[0].lesson.topic).toBe("deploy:proven");
+    expect(results[0].score).toBeGreaterThan(results[1].score);
+  });
+
+  it("boosts proven-ness via recall_count", async () => {
+    seed("cache:fresh", {
+      outcome: "success",
+      what_worked: "valkey ttl tuning",
+      tags: ["valkey"],
+      confidence: 0.6,
+      recall_count: 0,
+    });
+    seed("cache:battle-tested", {
+      outcome: "success",
+      what_worked: "valkey ttl tuning",
+      tags: ["valkey"],
+      confidence: 0.6,
+      recall_count: 50,
+    });
+    const brain = createCachlyBrain({ url: URL });
+    const results = await brain.recall("valkey ttl tuning");
+    expect(results[0].lesson.topic).toBe("cache:battle-tested");
+  });
+});
+
+describe("CachlyBrain.formatBriefing", () => {
+  beforeEach(() => store.clear());
+
+  it("frames failure lessons as anti-patterns to avoid", () => {
+    const brain = createCachlyBrain({ url: URL });
+    const briefing = brain.formatBriefing([
+      { lesson: { topic: "auth:safari", outcome: "failure", whatFailed: "missing httpOnly broke refresh" }, score: 0.5 },
+      { lesson: { topic: "deploy:fly", outcome: "success", whatWorked: "min_machines_running=1" }, score: 0.5 },
+    ]);
+    expect(briefing).toContain("AVOID — missing httpOnly broke refresh");
+    expect(briefing).not.toContain("AVOID — min_machines_running=1");
+    expect(briefing).toContain("avoid the ⚠️");
+  });
 });
 
 describe("CachlyBrain.learn", () => {
