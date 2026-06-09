@@ -60,7 +60,13 @@ export interface BrainLesson {
 
 export interface BrainRecallResult {
   lesson: BrainLesson;
-  score: number;           // keyword-overlap relevance, 0–1
+  /**
+   * Composite ranking score: keyword relevance weighted by the lesson's
+   * calibrated confidence, plus small proven-ness (recall_count) and severity
+   * boosts. An eroded/discredited lesson ranks below a proven one even at equal
+   * keyword overlap — so the briefing never surfaces a flipped lesson as gospel.
+   */
+  score: number;
 }
 
 export interface LearnInput {
@@ -230,8 +236,20 @@ class CachlyBrain {
     const lessons = await this.scanAll();
     const scored: BrainRecallResult[] = [];
     for (const lesson of lessons) {
-      const score = relevance(qTokens, lesson);
-      if (score >= threshold) scored.push({ lesson, score });
+      // Keyword overlap gates inclusion — irrelevant lessons stay out.
+      const rel = relevance(qTokens, lesson);
+      if (rel < threshold) continue;
+
+      // …but ranking folds in the calibration `learn()` worked so hard to build.
+      // A flipped lesson (confidence floored to 0.05) must not outrank a proven
+      // one (≈0.99) on keyword overlap alone.
+      const conf = lesson.confidence ?? 0.5;
+      const recallBoost = Math.min(0.15, Math.log1p(lesson.recallCount ?? 0) / 20);
+      const sevBoost =
+        lesson.severity === 'critical' ? 0.1 : lesson.severity === 'major' ? 0.05 : 0;
+
+      const score = rel * conf + recallBoost + sevBoost;
+      scored.push({ lesson, score });
     }
     scored.sort((a, b) => b.score - a.score);
     const top = scored.slice(0, topK);
@@ -321,12 +339,16 @@ class CachlyBrain {
   formatBriefing(results: BrainRecallResult[]): string {
     if (results.length === 0) return '';
     const lines = results.map(({ lesson }) => {
-      const mark = lesson.outcome === 'success' ? '✅' : '⚠️';
-      const body = lesson.outcome === 'success' ? lesson.whatWorked : lesson.whatFailed;
-      return `- ${mark} ${lesson.topic}: ${body ?? lesson.outcome}`;
+      const success = lesson.outcome === 'success';
+      const mark = success ? '✅' : '⚠️';
+      const body = success ? lesson.whatWorked : lesson.whatFailed;
+      // Failures are anti-patterns, not instructions — frame them as such so the
+      // assistant avoids the dead end instead of "applying" it.
+      const prefix = success ? '' : 'AVOID — ';
+      return `- ${mark} ${lesson.topic}: ${prefix}${body ?? lesson.outcome}`;
     });
     return [
-      'Relevant lessons your Brain has already learned (apply them, do not relearn):',
+      'Relevant lessons your Brain has already learned (apply the ✅, avoid the ⚠️ — do not relearn):',
       ...lines,
     ].join('\n');
   }
