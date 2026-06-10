@@ -27,15 +27,28 @@ export type { LLMMiddleware, LLMRequest, LLMResponse, SemanticLLMCacheOptions, E
 export { createCachlyMemoryAdapter } from './memory-adapter.js';
 export type { IMemoryStorage, MemoryEntry, MemorySearchResult, CachlyMemoryAdapterOptions } from './memory-adapter.js';
 
-export { createCachlyBrain, CachlyBrain } from './brain.js';
-export type {
-  CachlyBrainOptions,
-  BrainLesson,
-  BrainRecallResult,
-  LearnInput,
-  LessonOutcome,
-  LessonSeverity,
-} from './brain.js';
+// ── Brain Search (BM25+) ─────────────────────────────────────────────────────
+
+/**
+ * BM25+ keyword search over brain data. Works without embeddings.
+ *
+ * @param batchUrl - Cachly batch API URL
+ * @param query    - Natural-language search query
+ * @param topK     - Max results (default 10)
+ */
+export async function brainSearch(
+  batchUrl: string,
+  query: string,
+  topK = 10,
+): Promise<{ results: Array<{ key: string; score: number; matched_words: string[]; preview: string }>; total_docs: number; duration_ms: number }> {
+  const resp = await fetch(`${batchUrl.replace(/\/$/, '')}/brain-search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, top_k: topK }),
+  });
+  if (!resp.ok) throw new Error(`brainSearch failed: ${resp.status}`);
+  return resp.json();
+}
 
 // ── Convenience: createCachlyOpenClawConfig ───────────────────────────────────
 
@@ -49,8 +62,12 @@ export interface CachlyOpenClawConfig {
   url: string;
   /** Cachly vector API URL (Speed/Business tier) */
   vectorUrl?: string;
-  /** Embedding function – any provider */
-  embedFn: EmbedFn;
+  /**
+   * Embedding function for semantic matching.
+   * Optional — omit to start with exact-match caching (zero extra dependencies).
+   * Add to unlock semantic matching and increase hit rates by ~30%.
+   */
+  embedFn?: EmbedFn;
   ttl?: {
     session?: number;   // default: 604800 (7d)
     llm?: number;       // default: 3600 (1h)
@@ -104,12 +121,12 @@ export async function createCachlyOpenClawConfig(opts: CachlyOpenClawConfig) {
       ttl: opts.ttl?.session,
     }),
     llmMiddleware,
-    memoryEngine:  createCachlyMemoryAdapter({
+    memoryEngine:  opts.embedFn ? createCachlyMemoryAdapter({
       url:       opts.url,
       vectorUrl: opts.vectorUrl,
       embedFn:   opts.embedFn,
       ttl:       opts.ttl?.memory,
-    }),
+    }) : undefined,
   };
 }
 

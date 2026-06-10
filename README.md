@@ -1,156 +1,124 @@
 # @cachly-dev/openclaw
 
-> Official **cachly.dev** adapter for [OpenClaw](https://openclaw.dev) — the 22-channel AI assistant.  
-> Persistent sessions · Semantic LLM cache · Redis-native memory · EU data residency
+> **You paid $0.08 for that answer. The next 1,000 identical asks: $0.00.**  
+> Semantic LLM cache + persistent sessions + AI memory. 3 lines. No embeddings required.
 
 [![npm](https://img.shields.io/npm/v/@cachly-dev/openclaw?color=red&logo=npm)](https://www.npmjs.com/package/@cachly-dev/openclaw)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
-[![GDPR: EU-only](https://img.shields.io/badge/GDPR-EU%20only-green)](https://cachly.dev/legal)
+[![npm downloads](https://img.shields.io/npm/dm/@cachly-dev/openclaw?color=blue)](https://www.npmjs.com/package/@cachly-dev/openclaw)
+[![Free tier](https://img.shields.io/badge/Free%20tier-€0%2Fmo-brightgreen)](https://cachly.dev)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
 
 ---
 
-## What it provides
+## Before / After
 
-| Feature | Description | Impact |
-|---------|-------------|--------|
-| 🧠 **Brain Bridge** | Share the *same* compounding lesson store as Claude Code, Cursor & the IDE plugins | Cross-tool memory — your assistant arrives pre-briefed |
-| 🗄️ **Session Store** | Persistent Redis-backed conversation sessions | No cold starts, no lost history |
-| ⚡ **Semantic LLM Cache** | Cache LLM responses by meaning (pgvector HNSW) | 50–70 % cost reduction |
-| 💾 **Memory Adapter** | Redis + pgvector replaces LanceDB for long-term memory | EU data residency, Redis-native |
+```typescript
+// ❌ Before: Every user message calls OpenAI. Every time. No exceptions.
+const reply = await openai.chat.completions.create({ model: 'gpt-4o', messages })
+
+// ✅ After: Same questions = zero API calls = zero cost
+const cache = createSemanticLLMCache({ url: process.env.CACHLY_URL })
+const reply = await cache.getOrSet(userMessage, () =>
+  openai.chat.completions.create({ model: 'gpt-4o', messages })
+)
+```
+
+"How do I reset my password?" → "How can I reset my pw?" → **cache hit**. $0.00.
 
 ---
 
-## Installation
+## Setup — 60 seconds
 
 ```bash
 npm install @cachly-dev/openclaw
 ```
 
-> **Peer dependency:** `openclaw >= 2026.1.0`  
-> **Requires:** A cachly.dev instance — free tier at [cachly.dev](https://cachly.dev)
-
----
-
-## Quick Start
-
-```typescript
-import { createCachlyOpenClawConfig } from '@cachly-dev/openclaw'
-import OpenAI from 'openai'
-
-const openai = new OpenAI()
-
-const cachlyConfig = createCachlyOpenClawConfig({
-  url:       process.env.CACHLY_URL!,        // redis://:password@host:port
-  vectorUrl: process.env.CACHLY_VECTOR_URL,  // https://api.cachly.dev/v1/sem/{token}
-  embedFn:   async (text) => {
-    const res = await openai.embeddings.create({ model: 'text-embedding-3-small', input: text })
-    return res.data[0].embedding
-  },
-  ttl: {
-    session: 604800,   // 7 days
-    llm:     3600,     // 1 hour
-    memory:  7776000,  // 90 days
-  },
-})
-
-const app = new OpenClawApp({
-  ...cachlyConfig,
-  // ... your other config
-})
+```bash
+# Get a free Redis instance at cachly.dev (no credit card):
+CACHLY_URL=redis://:password@your-instance.cachly.dev:6379
 ```
 
 ---
 
-## Individual Adapters
+## ⚡ Semantic LLM Cache — 3 lines
 
-### 🧠 Brain Bridge
-
-The session store, cache, and memory adapter are commodity infrastructure. The
-**Brain** is what makes Cachly different: a persistent, compounding store of
-*lessons* — "this fix worked", "that approach failed" — that your instance
-already collects from Claude Code, Cursor, Copilot, and the VS Code / IntelliJ
-plugins.
-
-The Brain Bridge lets your OpenClaw agents read from and write to that **same**
-Brain. Your assistant arrives pre-briefed with what every other tool has already
-learned, and anything it discovers flows back so the next session — in any tool —
-benefits.
-
-```typescript
-import { createCachlyBrain } from '@cachly-dev/openclaw/brain'
-
-const brain = createCachlyBrain({ url: process.env.CACHLY_URL! })
-
-// 1) Auto pre-brief every LLM call with relevant lessons (chain before the cache):
-export default {
-  llmMiddleware: brain.briefingMiddleware(),
-}
-
-// 2) …or use it directly inside a skill:
-const lessons = await brain.recall('deploy to fly.io')
-// → [{ lesson: { topic: 'deploy:fly-io', whatWorked: 'set min_machines_running=1 …' }, score: 0.5 }]
-
-await brain.learn({
-  topic: 'deploy:fly-io',
-  outcome: 'success',
-  whatWorked: 'set min_machines_running=1 to avoid cold-start 502s',
-  severity: 'major',
-  tags: ['deploy', 'fly'],
-})
-```
-
-`learn()` calibrates confidence exactly like the rest of Cachly: a matching
-outcome reinforces a lesson (+0.1, capped 0.99), a flipped outcome erodes it
-(−0.15) and overwrites the guidance. `recall()` ranks by keyword relevance and
-bumps `recall_count` so cross-tool telemetry stays accurate — **no embeddings
-required**, so it works on every tier.
-
----
-
-### Session Store
-
-Persists OpenClaw conversation history in Redis:
-
-```typescript
-import { createCachlySessionStore } from '@cachly-dev/openclaw'
-
-const sessionStore = createCachlySessionStore({
-  url: process.env.CACHLY_URL!,
-  ttl: 604800, // 7 days
-})
-
-// Used automatically by OpenClaw — no manual calls needed.
-```
-
-### Semantic LLM Cache
-
-Intercepts LLM calls and returns cached responses for semantically identical prompts:
+Every time a user asks the same question in different words, you pay OpenAI again. This stops that.
 
 ```typescript
 import { createSemanticLLMCache } from '@cachly-dev/openclaw'
 
-const llmCache = createSemanticLLMCache({
-  url:       process.env.CACHLY_URL!,
-  vectorUrl: process.env.CACHLY_VECTOR_URL!,
-  embedFn:   myEmbedFn,
-  threshold: 0.92,    // similarity threshold (default: 0.92)
-  ttl:       3600,    // cache TTL in seconds
-  skipPatterns: [     // never cache these
-    'generate image',
-    'draw',
-    'real-time',
-  ],
-})
+const cache = createSemanticLLMCache({ url: process.env.CACHLY_URL! })
 
-const response = await llmCache.getOrSet(
-  'What is semantic caching?',
+// Wrap any LLM call — that's it
+const answer = await cache.getOrSet(
+  userPrompt,
   () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })
 )
 ```
 
-### Memory Adapter
+**Without an embed function + no vectorUrl:** exact-match caching + **local BM25+ fuzzy search** kick in immediately (20–50% savings). No API calls. "how do I reset password?" matches "password reset help" — pure in-process.
 
-Replaces LanceDB with Redis + pgvector for EU-compliant, Redis-native long-term memory:
+**Without an embed function + vectorUrl:** BM25 + hosted pgvector index, higher hit rates across large caches.
+
+**Add semantic matching** for 60–90% savings (10 more lines):
+
+```typescript
+const cache = createSemanticLLMCache({
+  url:       process.env.CACHLY_URL!,
+  vectorUrl: process.env.CACHLY_VECTOR_URL,   // from cachly.dev dashboard
+  embedFn:   (text) =>
+    openai.embeddings.create({ model: 'text-embedding-3-small', input: text })
+      .then(r => r.data[0].embedding),
+  threshold: 0.92,   // cosine similarity (default)
+  ttl:       3600,   // seconds
+})
+```
+
+"How do I reset my password?" → "How can I reset my pw?" → **same cache hit**. 💰
+
+---
+
+## 📊 What you save
+
+| Questions/day | Cache hit rate | Monthly saving (GPT-4o) |
+|---------------|---------------|------------------------|
+| 100           | 40% exact     | ~$8                    |
+| 100           | 70% semantic  | ~$22                   |
+| 1 000         | 70% semantic  | ~$220                  |
+| 10 000        | 70% semantic  | ~$2 200                |
+
+After 10 cache hits, the console logs:
+```
+🎯 cachly: 12,340 tokens saved this session (10 hits)
+   Full stats → cachly.dev/dashboard
+```
+(Cost breakdown available in the dashboard.)
+
+---
+
+## 🗄️ Session Store
+
+Persist conversation history in Redis — no cold starts, no lost context:
+
+```typescript
+import { createCachlySessionStore } from '@cachly-dev/openclaw'
+
+const sessions = createCachlySessionStore({
+  url: process.env.CACHLY_URL!,
+  ttl: 604800,  // 7 days
+})
+
+const history = await sessions.get(userId)
+await sessions.set(userId, [...history, { role: 'user', content: message }])
+```
+
+Works with any LLM framework — OpenAI, LangChain, Vercel AI SDK, etc.
+
+---
+
+## 🧠 Memory Adapter
+
+Long-term semantic memory — store facts, recall by meaning:
 
 ```typescript
 import { createCachlyMemoryAdapter } from '@cachly-dev/openclaw'
@@ -159,200 +127,433 @@ const memory = createCachlyMemoryAdapter({
   url:       process.env.CACHLY_URL!,
   vectorUrl: process.env.CACHLY_VECTOR_URL!,
   embedFn:   myEmbedFn,
-  namespace: 'openclaw:mem',
-  ttl:       7776000, // 90 days
+  ttl:       7776000,  // 90 days
 })
 
-await memory.store({ id: 'fact-1', text: 'User prefers TypeScript', metadata: {} })
+await memory.store({ id: 'pref-1', text: 'User prefers TypeScript over Python' })
 const results = await memory.search('programming language preference', { topK: 5 })
+// → [{ text: 'User prefers TypeScript over Python', score: 0.97 }]
 ```
 
 ---
 
-## AI Dev Brain — Persistent Memory for Your Coding Assistant
+## 🔍 Brain Search (BM25+)
 
-cachly ships a **30-tool MCP server** that gives Claude Code, Cursor, GitHub Copilot, and Windsurf a persistent memory across sessions — so they never forget your architecture, lessons learned, or last session context.
+Full-text search over cached data — no embeddings needed:
 
-```bash
-# One-time setup
-npx @cachly-dev/init
+```typescript
+import { brainSearch } from '@cachly-dev/openclaw'
+
+const results = await brainSearch(process.env.CACHLY_VECTOR_URL!, 'deploy authentication error')
+// → [{ key: 'lesson:fix:auth', score: 4.2, preview: '...' }]
 ```
 
-Or configure manually in your editor (`~/.vscode/mcp.json` / `.cursor/mcp.json`):
+---
 
-```json
-{
-  "servers": {
-    "cachly": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@cachly-dev/mcp-server"],
-      "env": { "CACHLY_JWT": "your-jwt-token" }
-    }
-  }
+## 🧩 Standalone — works with any LLM stack
+
+No OpenClaw needed. Drop into LangChain, Vercel AI SDK, plain `fetch`, or any custom pipeline:
+
+### LangChain
+```typescript
+import { createSemanticLLMCache } from '@cachly-dev/openclaw'
+import { ChatOpenAI } from '@langchain/openai'
+
+const cache = createSemanticLLMCache({ url: process.env.CACHLY_URL! })
+const llm = new ChatOpenAI()
+
+async function cachedInvoke(prompt: string) {
+  return cache.getOrSet(
+    prompt,
+    () => llm.invoke(prompt).then(r => ({ content: r.content as string, model: 'gpt-4o' }))
+  )
 }
 ```
 
-Add to your AI assistant instructions (e.g. `.github/copilot-instructions.md`):
+### Vercel AI SDK
+```typescript
+import { createSemanticLLMCache } from '@cachly-dev/openclaw'
+import { generateText } from 'ai'
+import { openai } from '@ai-sdk/openai'
 
-```markdown
-## cachly AI Brain
+const cache = createSemanticLLMCache({ url: process.env.CACHLY_URL! })
 
-At the START of every session:
-session_start(instance_id = "your-instance-id", focus = "what you're working on today")
-
-At the END of every session:
-session_end(instance_id = "your-instance-id", summary = "...", files_changed = [...])
-
-After any bug fix or deploy:
-learn_from_attempts(instance_id = "your-instance-id", topic = "category:keyword",
-  outcome = "success", what_worked = "...", what_failed = "...", severity = "major")
+export async function POST(req: Request) {
+  const { prompt } = await req.json()
+  const result = await cache.getOrSet(
+    prompt,
+    () => generateText({ model: openai('gpt-4o'), prompt }).then(r => ({ content: r.text, model: 'gpt-4o' }))
+  )
+  return Response.json(result)
+}
 ```
 
-`session_start` returns a full briefing in **one call**: last session summary, relevant lessons, open failures, brain health. 60 % fewer file reads, instant context, zero re-discovery.
+### Plain fetch / any provider
+```typescript
+import { createSemanticLLMCache } from '@cachly-dev/openclaw'
 
-→ Full docs: [cachly.dev/docs/ai-memory](https://cachly.dev/docs/ai-memory)
+const cache = createSemanticLLMCache({ url: process.env.CACHLY_URL! })
+
+const answer = await cache.getOrSet(
+  userMessage,
+  async () => {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': process.env.ANTHROPIC_KEY!, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 1024, messages: [{ role: 'user', content: userMessage }] }),
+    })
+    const json = await res.json()
+    return { content: json.content[0].text, model: 'claude-opus-4-5', inputTokens: json.usage.input_tokens, outputTokens: json.usage.output_tokens }
+  }
+)
+```
 
 ---
 
-## Real-World Use Cases
+## 🦾 OpenClaw adapter (bonus)
 
-### 1. WhatsApp Customer Support Bot with Memory
-
-Every conversation starts from scratch — no context, no history. OpenClaw + cachly = a bot that remembers.
+If you use [OpenClaw](https://openclaw.dev) (22-channel AI assistant), one function wires everything:
 
 ```typescript
-import { OpenClaw } from '@cachly-dev/openclaw'
+import { createCachlyOpenClawConfig } from '@cachly-dev/openclaw'
+import OpenAI from 'openai'
 
-const bot = new OpenClaw({
-  channels: ['whatsapp'],
-  cachlyUrl: process.env.CACHLY_URL,
+const openai = new OpenAI()
+
+const cachlyConfig = await createCachlyOpenClawConfig({
+  url:       process.env.CACHLY_URL!,
   vectorUrl: process.env.CACHLY_VECTOR_URL,
-  embedFn: openaiEmbed,
+  embedFn:   (t) =>
+    openai.embeddings.create({ model: 'text-embedding-3-small', input: t })
+      .then(r => r.data[0].embedding),
 })
 
-bot.on('message', async (msg) => {
-  // Check semantic cache — has a similar question been answered before?
-  const cached = await bot.memory.recall(msg.text, { threshold: 0.85 })
-  if (cached) return msg.reply(cached.response)  // instant, free
-
-  const response = await llm.complete(msg.text, {
-    context: await bot.memory.getHistory(msg.userId, { limit: 10 }),
-  })
-
-  await bot.memory.store(msg.text, response)
-  return msg.reply(response)
+const app = new OpenClawApp({
+  ...cachlyConfig,
+  // ... rest of your config
 })
 ```
 
-**Impact:** 500 messages/day at 65 % cache hit rate → ~€200/month saved in LLM costs.
+This gives you: semantic cache + persistent sessions + Redis memory — all across WhatsApp, Telegram, Slack, Discord at once.
 
 ---
 
-### 2. Slack Knowledge Bot for Engineering Teams
+## 👥 Team Brain
 
-"How do I deploy to staging?" gets asked every week. Cache the answers — instant tribal knowledge.
+One shared cachly instance → every team member gets smarter from each other's work:
 
 ```typescript
-const bot = new OpenClaw({
-  channels: ['slack'],
-  cachlyUrl: process.env.CACHLY_URL,
-  vectorUrl: process.env.CACHLY_VECTOR_URL,
-  embedFn: openaiEmbed,
-  namespace: 'engineering-kb',
-})
+// Alice fixes a deploy issue:
+await brain.learnFromAttempts({ topic: 'deploy:k8s', outcome: 'success', whatWorked: '...' })
 
-// Pre-warm with your runbooks and documentation
-await bot.memory.batchIndex([
-  { prompt: 'How to deploy to staging', response: 'Run `make deploy-staging`...' },
-  { prompt: 'Database migration steps', response: 'See runbook at...' },
-  { prompt: 'How to access production logs', response: 'Use `kubectl logs`...' },
-])
-
-// "how do I push to staging?" → semantic match (0.91 similarity) → instant answer
+// Bob starts a session the next day:
+await brain.sessionStart()
+// → "💡 alice solved deploy:k8s 1d ago: ..."
 ```
+
+Team plans from €99/mo (10 seats) at [cachly.dev/teams](https://cachly.dev/teams).
 
 ---
 
-### 3. Multi-Channel FAQ Bot (WhatsApp + Telegram + Discord)
+## 🚀 Upgrade path
 
-One OpenClaw bot, three channels, one shared semantic cache. A question answered on WhatsApp instantly benefits Telegram and Discord users.
-
-```typescript
-const bot = new OpenClaw({
-  channels: ['whatsapp', 'telegram', 'discord'],
-  cachlyUrl: process.env.CACHLY_URL,
-  vectorUrl: process.env.CACHLY_VECTOR_URL,
-  embedFn: openaiEmbed,
-})
-
-// Same semantic cache, same knowledge, zero duplication across channels
-```
+| Level | What you get | Setup |
+|-------|-------------|-------|
+| **Free — Exact + BM25** | 20–50% reduction, in-process BM25+ fuzzy, zero config | `CACHLY_URL` only |
+| **Free — Semantic cache** | 60–90% cost reduction | + `embedFn` |
+| **Speed tier** | Hosted pgvector, higher hit rates at scale | Speed plan at cachly.dev |
+| **Team Brain** | Shared knowledge, team lessons, analytics | cachly.dev/teams |
 
 ---
 
-### 4. Personal AI Journal (Telegram)
+## 🤖 Use with Python AI Agents
 
-An AI companion that remembers your conversations, goals, and moods across months — not just one session.
+OpenClaw has a TypeScript SDK, but Python AI agents can use Cachly's REST API directly for persistent memory and semantic caching. Here are patterns for the most popular frameworks.
 
-```typescript
-const journal = new OpenClaw({
-  channels: ['telegram'],
-  cachlyUrl: process.env.CACHLY_URL,
-  vectorUrl: process.env.CACHLY_VECTOR_URL,
-  embedFn: openaiEmbed,
-  namespace: 'personal-journal',
-})
+### LangChain — Persistent Agent Memory
 
-journal.on('message', async (msg) => {
-  await journal.memory.store(msg.text, msg.text, {
-    namespace: `journal:${msg.userId}`,
-    ttl: 0,  // never expire
-  })
+```python
+import os, requests
+from langchain.memory import ConversationBufferMemory
+from langchain.schema import BaseMemory
+from typing import Any
 
-  const related = await journal.memory.recall(msg.text, {
-    namespace: `journal:${msg.userId}`,
-    threshold: 0.75,
-  })
+CACHLY_URL = os.environ["CACHLY_URL"]
+CACHLY_JWT = os.environ["CACHLY_JWT"]
+INSTANCE_ID = os.environ["CACHLY_BRAIN_INSTANCE_ID"]
+HEADERS = {"Authorization": f"Bearer {CACHLY_JWT}", "Content-Type": "application/json"}
 
-  return msg.reply(await llm.complete(msg.text, { context: related }))
-})
+class CachlyBrainMemory(BaseMemory):
+    """LangChain memory backed by Cachly Brain — survives restarts."""
+
+    @property
+    def memory_variables(self):
+        return ["brain_context"]
+
+    def load_memory_variables(self, inputs: dict) -> dict:
+        query = inputs.get("input", "")
+        r = requests.post(
+            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/smart-recall",
+            headers=HEADERS,
+            json={"query": query, "topK": 3},
+        )
+        lessons = r.json().get("results", [])
+        context = "\n".join(f"- {l['whatWorked']}" for l in lessons if l.get("whatWorked"))
+        return {"brain_context": context or "No relevant memory found."}
+
+    def save_context(self, inputs: dict, outputs: dict) -> None:
+        # Learn from what the agent discovered
+        output = outputs.get("output", "")
+        if output:
+            requests.post(
+                f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/learn",
+                headers=HEADERS,
+                json={"topic": "agent:langchain", "outcome": "success", "whatWorked": output[:500]},
+            )
+
+    def clear(self):
+        pass  # Brain is persistent — clear not supported by design
+
+
+# Usage:
+from langchain.agents import initialize_agent, AgentType
+from langchain.chat_models import ChatOpenAI
+
+memory = CachlyBrainMemory()
+agent = initialize_agent(
+    tools=[...],
+    llm=ChatOpenAI(model="gpt-4o"),
+    agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
+    memory=memory,
+    system_message="You have access to a persistent Brain. brain_context = {brain_context}",
+)
 ```
 
----
+### CrewAI — Shared Team Brain Tool
 
-## Auth & Security
+```python
+import os, requests
+from crewai_tools import BaseTool
+from pydantic import BaseModel, Field
 
-cachly uses **Keycloak** (self-hosted OIDC) for authentication. Your Redis password and vector token are scoped per instance and never shared.
+CACHLY_URL = os.environ["CACHLY_URL"]
+CACHLY_JWT = os.environ["CACHLY_JWT"]
+INSTANCE_ID = os.environ["CACHLY_BRAIN_INSTANCE_ID"]
+HEADERS = {"Authorization": f"Bearer {CACHLY_JWT}"}
+
+class RecallInput(BaseModel):
+    query: str = Field(description="What to search for in the Brain")
+
+class CachlyRecallTool(BaseTool):
+    name: str = "cachly_brain_recall"
+    description: str = "Search persistent memory for lessons, solutions, and context from past work"
+    args_schema: type[BaseModel] = RecallInput
+
+    def _run(self, query: str) -> str:
+        r = requests.post(
+            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/smart-recall",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json={"query": query, "topK": 5},
+        )
+        results = r.json().get("results", [])
+        if not results:
+            return "No relevant memory found."
+        return "\n".join(f"[{l['topic']}] {l['whatWorked']}" for l in results)
+
+class LearnInput(BaseModel):
+    topic: str = Field(description="Category slug like 'deploy:api' or 'fix:auth'")
+    what_worked: str = Field(description="What solution worked")
+    outcome: str = Field(default="success", description="success | failure | partial")
+
+class CachlyLearnTool(BaseTool):
+    name: str = "cachly_brain_learn"
+    description: str = "Store a lesson in persistent memory so future agents can benefit from it"
+    args_schema: type[BaseModel] = LearnInput
+
+    def _run(self, topic: str, what_worked: str, outcome: str = "success") -> str:
+        requests.post(
+            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/learn",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json={"topic": topic, "outcome": outcome, "whatWorked": what_worked},
+        )
+        return f"✅ Stored lesson: {topic}"
+
+
+# Usage with CrewAI:
+from crewai import Agent, Task, Crew
+
+researcher = Agent(
+    role="Research Analyst",
+    goal="Research topics and store findings for the team",
+    tools=[CachlyRecallTool(), CachlyLearnTool()],
+    backstory="You have a persistent memory that survives across sessions.",
+)
+```
+
+### AutoGen / Microsoft AutoGen
+
+```python
+import os, requests
+from autogen import AssistantAgent, UserProxyAgent
+
+CACHLY_URL = os.environ["CACHLY_URL"]
+CACHLY_JWT = os.environ["CACHLY_JWT"]
+INSTANCE_ID = os.environ["CACHLY_BRAIN_INSTANCE_ID"]
+HEADERS = {"Authorization": f"Bearer {CACHLY_JWT}", "Content-Type": "application/json"}
+
+def recall_brain(query: str) -> str:
+    """Search Cachly Brain for relevant memory."""
+    r = requests.post(
+        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/smart-recall",
+        headers=HEADERS, json={"query": query, "topK": 5},
+    )
+    results = r.json().get("results", [])
+    return "\n".join(f"• [{l['topic']}] {l['whatWorked']}" for l in results) or "No memory found."
+
+def store_lesson(topic: str, what_worked: str, outcome: str = "success") -> str:
+    """Store a lesson in Cachly Brain."""
+    requests.post(
+        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/learn",
+        headers=HEADERS, json={"topic": topic, "outcome": outcome, "whatWorked": what_worked},
+    )
+    return f"Stored: {topic}"
+
+assistant = AssistantAgent(
+    name="CachlyAssistant",
+    system_message="""You are a helpful AI with persistent memory via Cachly Brain.
+ALWAYS start by calling recall_brain() with the user's query.
+ALWAYS end by calling store_lesson() with what you discovered.""",
+    llm_config={
+        "functions": [
+            {"name": "recall_brain", "description": "Search persistent memory", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+            {"name": "store_lesson", "description": "Store a lesson", "parameters": {"type": "object", "properties": {"topic": {"type": "string"}, "what_worked": {"type": "string"}, "outcome": {"type": "string"}}, "required": ["topic", "what_worked"]}},
+        ],
+    },
+)
+```
+
+### LlamaIndex — QueryEngine with Cachly Memory
+
+```python
+import os, requests
+from llama_index.core.memory import BaseMemory
+from llama_index.core.schema import TextNode
+
+CACHLY_URL = os.environ["CACHLY_URL"]
+CACHLY_JWT = os.environ["CACHLY_JWT"]
+INSTANCE_ID = os.environ["CACHLY_BRAIN_INSTANCE_ID"]
+HEADERS = {"Authorization": f"Bearer {CACHLY_JWT}", "Content-Type": "application/json"}
+
+class CachlyMemory(BaseMemory):
+    """LlamaIndex memory backed by Cachly Brain."""
+
+    def get(self, input: str, **kwargs) -> list[TextNode]:
+        r = requests.post(
+            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/smart-recall",
+            headers=HEADERS, json={"query": input, "topK": 5},
+        )
+        return [
+            TextNode(text=f"[{l['topic']}] {l.get('whatWorked', '')}")
+            for l in r.json().get("results", [])
+        ]
+
+    def put(self, messages) -> None:
+        for msg in messages:
+            if hasattr(msg, "content") and msg.content:
+                requests.post(
+                    f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/learn",
+                    headers=HEADERS,
+                    json={"topic": "agent:llamaindex", "outcome": "success", "whatWorked": str(msg.content)[:500]},
+                )
+
+    def reset(self) -> None:
+        pass  # Persistent by design
+
+
+# Usage:
+from llama_index.core.chat_engine import CondensePlusContextChatEngine
+
+chat_engine = CondensePlusContextChatEngine.from_defaults(
+    index.as_retriever(),
+    memory=CachlyMemory(),
+    verbose=True,
+)
+response = chat_engine.chat("How did we fix the last deployment issue?")
+```
+
+### Semantic Cache for LLM API Calls (Python)
+
+Skip expensive LLM calls for semantically similar prompts — no embeddings needed on your side:
+
+```python
+import os, hashlib, requests
+
+CACHLY_URL = os.environ["CACHLY_URL"]
+CACHLY_JWT = os.environ["CACHLY_JWT"]
+INSTANCE_ID = os.environ["CACHLY_BRAIN_INSTANCE_ID"]
+HEADERS = {"Authorization": f"Bearer {CACHLY_JWT}", "Content-Type": "application/json"}
+
+def cached_llm_call(prompt: str, llm_fn, namespace: str = "cachly:sem:qa") -> str:
+    """Call LLM with semantic caching via Cachly."""
+    # 1. Check semantic cache
+    r = requests.post(
+        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/cache/semantic-search",
+        headers=HEADERS,
+        json={"query": prompt, "namespace": namespace, "threshold": 0.85},
+    )
+    hit = r.json().get("hit")
+    if hit:
+        return hit["value"]  # Cache hit — no LLM call needed 🎉
+
+    # 2. Cache miss — call LLM
+    response = llm_fn(prompt)
+
+    # 3. Store in semantic cache
+    key = hashlib.sha256(prompt.encode()).hexdigest()[:16]
+    requests.post(
+        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/cache/semantic",
+        headers=HEADERS,
+        json={"key": key, "value": response, "namespace": namespace, "prompt": prompt},
+    )
+    return response
+
+
+# Usage with any LLM:
+import openai
+client = openai.OpenAI()
+
+def call_gpt(prompt: str) -> str:
+    return client.chat.completions.create(
+        model="gpt-4o", messages=[{"role": "user", "content": prompt}]
+    ).choices[0].message.content
+
+answer = cached_llm_call("What is the capital of France?", call_gpt)
+```
+
+### Environment Setup for Python Agents
 
 ```bash
-CACHLY_URL=redis://:your-password@your-instance.cachly.dev:6379
-CACHLY_VECTOR_URL=https://api.cachly.dev/v1/sem/your-vector-token
+pip install requests python-dotenv
+
+# .env
+CACHLY_URL=https://api.cachly.dev
+CACHLY_JWT=cky_live_...          # from cachly.dev → Dashboard → API Keys
+CACHLY_BRAIN_INSTANCE_ID=...     # from cachly.dev → Dashboard → Brain
 ```
 
-Get your credentials at [cachly.dev/instances](https://cachly.dev/instances).
-
----
-
-## Development
-
-```bash
-npm install
-npm run build     # tsc
-npm test          # vitest
-npm run typecheck # tsc --noEmit
-```
+Get your free instance at **[cachly.dev/setup-ai](https://cachly.dev/setup-ai)** — no credit card required.
 
 ---
 
 ## Links
 
-- 📖 [cachly.dev docs](https://cachly.dev/docs/openclaw)
+- 📖 [cachly.dev docs](https://cachly.dev/docs)
 - 🧠 [AI Memory / MCP Server](https://cachly.dev/docs/ai-memory)
-- 🔧 [OpenClaw](https://openclaw.dev)
-- 🐛 [Issues](https://github.com/cachly-dev/sdk-js/issues)
+- 📦 [`@cachly-dev/mcp-server`](https://www.npmjs.com/package/@cachly-dev/mcp-server) — give your AI editor persistent memory (51 MCP tools)
+- 🤖 [OpenClaw](https://openclaw.dev)
 - 📦 [npm](https://www.npmjs.com/package/@cachly-dev/openclaw)
+- 🐛 [Issues](https://github.com/cachly-dev/cachly/issues)
 
 ---
 
-MIT © [cachly.dev](https://cachly.dev)
+Apache-2.0 © [cachly.dev](https://cachly.dev)

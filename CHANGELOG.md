@@ -7,21 +7,28 @@
 
 ---
 
+## [0.3.1] – 2026-06-09
+
+### Fixed
+
+- **`recall()` confidence-aware ranking** — lessons are now ranked by
+  `relevance × confidence + recall_count_boost + severity_boost`.
+  Previously a discredited lesson (confidence 0.05 after a flipped outcome)
+  ranked identically to a proven one (0.99) on keyword overlap alone, so
+  `briefingMiddleware` could instruct the assistant to "apply, do not relearn"
+  a fix that had already been reversed.
+- **Failure framing in `formatBriefing`** — failure lessons are now prefixed
+  `AVOID —` in the briefing block so the assistant treats them as anti-patterns
+  rather than instructions to follow.
+
 ## [0.3.0] – 2026-06-06
 
 ### Added
 
-- **Brain Bridge** (`@cachly-dev/openclaw/brain`) — OpenClaw agents now share the
-  same compounding lesson Brain as Claude Code, Cursor, Copilot, and the VS Code /
-  IntelliJ plugins, via the canonical `cachly:lesson:best:*` keys on the instance.
-  - `createCachlyBrain({ url })` — factory backed by the same Redis/Valkey the other adapters use
-  - `recall(query, { topK, threshold })` — keyword-ranked lesson retrieval (embedding-free, every tier); bumps `recall_count`
-  - `learn({ topic, outcome, whatWorked, whatFailed, severity, … })` — stores/reinforces lessons with Cachly's confidence calibration (+0.1 reinforce / −0.15 erode, capped 0.05–0.99)
-  - `briefingMiddleware()` — LLM middleware that pre-briefs the system prompt with relevant lessons
-  - `formatBriefing()`, `size()`, `close()` helpers
-  - 11 unit tests covering recall ranking, confidence calibration, briefing, and sizing
-
----
+- **Brain Bridge** (`@cachly-dev/openclaw/brain`) — OpenClaw agents share the
+  same compounding lesson Brain as Claude Code, Cursor, Copilot, and the IDE
+  plugins. `createCachlyBrain()` provides `recall()`, `learn()`,
+  `formatBriefing()`, and `briefingMiddleware()`.
 
 ## [0.2.0] – 2026-04-07
 

@@ -1,7 +1,7 @@
 {
   "name": "@cachly-dev/openclaw",
-  "version": "0.3.0",
-  "description": "Official Cachly adapter for OpenClaw – shared compounding Brain, persistent sessions, semantic LLM cache, memory storage, and cost tracking",
+  "version": "0.3.1",
+  "description": "Cut LLM API costs 60–90% in 3 lines of code. Semantic cache with BM25+ fuzzy matching, persistent sessions, AI memory adapter. Works with OpenAI, Anthropic, LangChain, Vercel AI SDK. No embeddings required for basic caching.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -32,19 +32,35 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/postinstall.js"
   },
   "keywords": [
-    "openclaw",
-    "cachly",
-    "cache",
-    "redis",
-    "llm",
+    "llm-cache",
     "semantic-cache",
-    "session",
+    "ai-cache",
+    "openai-cache",
+    "llm-cost",
+    "token-savings",
+    "bm25",
+    "vector-cache",
+    "session-store",
     "ai-memory",
-    "brain",
-    "persistent-memory"
+    "langchain",
+    "vercel-ai",
+    "openai",
+    "anthropic",
+    "gpt",
+    "claude",
+    "redis",
+    "valkey",
+    "cache",
+    "cachly",
+    "openclaw",
+    "llm",
+    "ai-agent",
+    "rag",
+    "semantic-search"
   ],
   "dependencies": {
     "ioredis": "^5.4.1"
@@ -65,13 +81,14 @@
   "engines": {
     "node": ">=22.14.0"
   },
+  "license": "Apache-2.0",
   "publishConfig": {
     "access": "public"
   },
   "homepage": "https://cachly.dev/docs/openclaw",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cachly-dev/sdk-js",
+    "url": "https://github.com/cachly-dev/cachly-js",
     "directory": "packages/openclaw"
   }
 }

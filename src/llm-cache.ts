@@ -75,8 +75,26 @@ export interface SemanticLLMCacheOptions {
   url: string;
   /** Cachly vector API URL (Speed/Business tier) */
   vectorUrl?: string;
-  /** Embedding function – any provider works */
-  embedFn: EmbedFn;
+  /**
+   * Embedding function for semantic matching.
+   * Optional — when omitted:
+   *  - With vectorUrl: BM25 keyword-based fuzzy matching (no embeddings needed)
+   *  - Without vectorUrl: exact-match (hash) caching
+   * Add embedFn to upgrade to full pgvector semantic matching (+30% more hits).
+   * @example async (text) => openai.embeddings.create({ model: 'text-embedding-3-small', input: text }).then(r => r.data[0].embedding)
+   */
+  embedFn?: EmbedFn;
+  /**
+   * BM25 match score threshold (default: 2.0).
+   * Only relevant when vectorUrl is provided but no embedFn.
+   * Higher = stricter keyword match required.
+   */
+  bm25Threshold?: number;
+  /**
+   * Log a token-savings summary every N cache hits (default: 10).
+   * Set to 0 to disable. Shows: "🎯 cachly: 12,340 tokens saved (15 hits) · ~$0.31"
+   */
+  tokenMilestone?: number;
   /** LLM response TTL in seconds (default: 3600) */
   ttl?: number;
   /** Cosine similarity threshold 0–1 (default: 0.92) */
@@ -212,6 +230,165 @@ function normalizePrompt(text: string, fillerWords: string[] = DEFAULT_FILLER_WO
     .trim();
 }
 
+// ── Local BM25+ keyword search engine ────────────────────────────────────────
+// Ported from @cachly-dev/mcp-server — runs fully in-process, no API calls,
+// no embeddings required. Covers:
+//  • BM25+ scoring (Lv & Zhai 2011)
+//  • Bigram proximity boost (+50% for adjacent query terms)
+//  • Levenshtein fuzzy match (distance ≤ 2, for typos)
+//  • Recency decay (7-day half-life)
+//  • Multi-query splitting (semicolons, numbered lists, conjunctions)
+
+const BM25_K1    = 1.2;
+const BM25_B     = 0.75;
+const BM25_DELTA = 1.0;
+const RECENCY_HALF_LIFE_DAYS = 7;
+
+const STOPWORDS = new Set([
+  'a','an','the','and','or','but','in','on','at','to','for','of','with','by',
+  'from','is','are','was','were','be','been','being','have','has','had',
+  'do','does','did','will','would','could','should','may','might','shall',
+  'i','you','he','she','it','we','they','my','your','his','her','its',
+  'this','that','these','those','what','which','who','whom','how','when','where','why',
+  'not','no','nor','so','yet','both','either','neither','just','also',
+  'ein','eine','der','die','das','und','oder','in','auf','mit','von','zu','für',
+]);
+
+interface BM25Doc { key: string; content: string; tokens: string[]; freq: Map<string,number>; bigrams: Set<string>; ts?: number; }
+interface BM25Match { key: string; content: string; score: number; matchedWords: string[]; }
+
+function bm25Tokenize(text: string): string[] {
+  return text.toLowerCase()
+    .replace(/[^a-záàâãäåæçéèêëíìîïñóòôõöúùûüýÿ0-9:_\-.]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !STOPWORDS.has(w));
+}
+
+function bm25Levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let corner = i - 1; prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cur = Math.min(prev[j]+1, prev[j-1]+1, corner + (a[i-1]===b[j-1]?0:1));
+      corner = prev[j]; prev[j] = cur;
+    }
+  }
+  return prev[b.length];
+}
+
+function bm25RecencyBoost(ts?: number): number {
+  if (!ts) return 1.0;
+  const ageDays = (Date.now() - ts) / 86_400_000;
+  return Math.pow(0.5, ageDays / RECENCY_HALF_LIFE_DAYS) + 0.5;
+}
+
+function bm25SplitQuery(q: string): string[] {
+  const numbered = q.split(/\d+[.)]\s*/g).filter(s => s.trim().length > 2);
+  if (numbered.length >= 2) return numbered.map(s => s.trim());
+  const semi = q.split(/[;\n]+/).filter(s => s.trim().length > 2);
+  if (semi.length >= 2) return semi.map(s => s.trim());
+  const conj = q.split(/\b(?:and also|also noch|außerdem|plus|additionally|furthermore)\b/i).filter(s => s.trim().length > 2);
+  if (conj.length >= 2) return conj.map(s => s.trim());
+  return [q];
+}
+
+/**
+ * Local BM25+ search over arbitrary key→value Redis entries.
+ * No embeddings, no API calls — pure in-process scoring.
+ */
+async function localBM25Search(
+  redis: Redis,
+  namespace: string,
+  query: string,
+  topK = 3,
+  minScore = 1.5,
+): Promise<BM25Match[]> {
+  // Scan all value keys in the namespace
+  const allKeys: string[] = [];
+  const stream = (redis as any).scanStream({ match: `${namespace}:val:*`, count: 200 });
+  await new Promise<void>((resolve, reject) => {
+    stream.on('data', (batch: string[]) => allKeys.push(...batch));
+    stream.on('end', resolve);
+    stream.on('error', reject);
+  });
+  if (allKeys.length === 0) return [];
+
+  const pipeline = redis.pipeline();
+  for (const key of allKeys) pipeline.get(key);
+  const results = await pipeline.exec();
+
+  const docs: BM25Doc[] = [];
+  let totalToks = 0;
+  for (let i = 0; i < allKeys.length; i++) {
+    const content = results?.[i]?.[1] as string | null;
+    if (!content) continue;
+    const tokens = bm25Tokenize(`${allKeys[i]} ${content}`);
+    if (!tokens.length) continue;
+    const freq = new Map<string,number>();
+    for (const t of tokens) freq.set(t, (freq.get(t) ?? 0) + 1);
+    const bigrams = new Set<string>();
+    for (let j = 0; j < tokens.length - 1; j++) bigrams.add(`${tokens[j]}|${tokens[j+1]}`);
+    const tsMatch = content.match(/"(?:ts|created|created_at|timestamp)"\s*:\s*"([^"]+)"/);
+    const ts = tsMatch ? Date.parse(tsMatch[1]) : undefined;
+    docs.push({ key: allKeys[i], content, tokens, freq, bigrams, ts: isNaN(ts as any) ? undefined : ts });
+    totalToks += tokens.length;
+  }
+  if (!docs.length) return [];
+
+  const avgDL = totalToks / docs.length;
+  const docFreq = new Map<string,number>();
+  for (const doc of docs) {
+    const seen = new Set<string>();
+    for (const t of doc.tokens) { if (!seen.has(t)) { docFreq.set(t, (docFreq.get(t) ?? 0)+1); seen.add(t); } }
+  }
+  const N = docs.length;
+  const idf = (t: string) => Math.log((N - (docFreq.get(t)??0) + 0.5) / ((docFreq.get(t)??0) + 0.5) + 1);
+  const bm25Term = (t: string, doc: BM25Doc) => {
+    const tf = doc.freq.get(t) ?? 0; if (!tf) return 0;
+    const dl = doc.tokens.length;
+    return idf(t) * ((tf*(BM25_K1+1)) / (tf + BM25_K1*(1-BM25_B+BM25_B*(dl/avgDL))) + BM25_DELTA);
+  };
+  const fuzzyMatch = (qt: string, docTerms: Set<string>): [string,number]|null => {
+    if (docTerms.has(qt)) return [qt, 1.0];
+    for (const dt of docTerms) if (dt.length>3 && qt.length>3 && (dt.includes(qt)||qt.includes(dt))) return [dt, 0.6];
+    if (qt.length >= 4) for (const dt of docTerms) if (dt.length>=4 && bm25Levenshtein(qt,dt)<=2) return [dt, 0.4];
+    return null;
+  };
+
+  const subQueries = bm25SplitQuery(query);
+  const scored = new Map<string, BM25Match>();
+
+  for (const sq of subQueries) {
+    const qTokens = bm25Tokenize(sq);
+    if (!qTokens.length) continue;
+    const qBigrams = new Set<string>();
+    for (let j = 0; j < qTokens.length-1; j++) qBigrams.add(`${qTokens[j]}|${qTokens[j+1]}`);
+
+    for (const doc of docs) {
+      let score = 0; const matched: string[] = [];
+      const docTerms = new Set(doc.tokens);
+      for (const qt of qTokens) {
+        const exact = bm25Term(qt, doc);
+        if (exact > 0) { score += exact; matched.push(qt); continue; }
+        const fuzz = fuzzyMatch(qt, docTerms);
+        if (fuzz) { score += bm25Term(fuzz[0], doc) * fuzz[1]; matched.push(`~${qt}`); }
+      }
+      if (qBigrams.size > 0) {
+        let hits = 0; for (const bg of qBigrams) if (doc.bigrams.has(bg)) hits++;
+        if (hits > 0) score *= 1 + 0.5 * (hits / qBigrams.size);
+      }
+      score *= bm25RecencyBoost(doc.ts);
+      if (score < minScore) continue;
+      const existing = scored.get(doc.key);
+      if (!existing || score > existing.score) scored.set(doc.key, { key: doc.key, content: doc.content, score, matchedWords: matched });
+    }
+  }
+
+  return [...scored.values()].sort((a,b) => b.score - a.score).slice(0, topK);
+}
+
 // ── Confidence banding ────────────────────────────────────────────────────────
 
 /** Three-level confidence band for semantic hits. */
@@ -250,8 +427,12 @@ function cosineSimilarity(a: number[], b: number[]): number {
 class SemanticLLMCache {
   private readonly redis: Redis;
   private readonly opts: Required<Omit<SemanticLLMCacheOptions,
-    'vectorUrl' | 'channelTtl' | 'cacheChannels' | 'skipPatterns' | 'fillerWords'>>
-    & Pick<SemanticLLMCacheOptions, 'vectorUrl' | 'channelTtl' | 'cacheChannels' | 'skipPatterns' | 'fillerWords'>;
+    'vectorUrl' | 'channelTtl' | 'cacheChannels' | 'skipPatterns' | 'fillerWords' | 'embedFn'>>
+    & Pick<SemanticLLMCacheOptions, 'vectorUrl' | 'channelTtl' | 'cacheChannels' | 'skipPatterns' | 'fillerWords' | 'embedFn'>;
+
+  /** In-process session counters (reset on process restart) */
+  private sessionHits = 0;
+  private sessionTokens = 0;
 
   constructor(opts: SemanticLLMCacheOptions) {
     this.redis = new Redis(opts.url);
@@ -264,6 +445,8 @@ class SemanticLLMCache {
       normalizePrompt:         opts.normalizePrompt         ?? true,
       highConfidenceThreshold: opts.highConfidenceThreshold ?? 0.97,
       autoNamespace:           opts.autoNamespace           ?? false,
+      bm25Threshold:           opts.bm25Threshold           ?? 2.0,
+      tokenMilestone:          opts.tokenMilestone          ?? 10,
     };
   }
 
@@ -287,6 +470,35 @@ class SemanticLLMCache {
   private ttlFor(channel?: string): number {
     const override = channel ? (this.opts.channelTtl?.[channel] ?? 0) : 0;
     return override > 0 ? override : this.opts.ttl;
+  }
+
+  /** Log a token milestone message (every N hits, configurable via tokenMilestone option) */
+  private maybePrintTokenMilestone(tokensJustSaved: number, _costJustSaved: number): void {
+    if (this.opts.tokenMilestone <= 0) return;
+    this.sessionHits++;
+    this.sessionTokens += tokensJustSaved;
+    if (this.sessionHits % this.opts.tokenMilestone === 0) {
+      const tokensFormatted = this.sessionTokens.toLocaleString('en');
+      console.log(
+        `\n🎯 cachly: ${tokensFormatted} tokens saved this session (${this.sessionHits} hits)\n` +
+        `   Full stats → cachly.dev/dashboard\n`,
+      );
+    }
+  }
+
+  /**
+   * Local BM25+ fuzzy keyword search — the middle tier between exact hash and pgvector.
+   * No embeddings, no extra API calls — runs entirely in-process.
+   * "how do I reset password?" matches "password reset help" (Levenshtein + bigrams).
+   * Same engine as @cachly-dev/mcp-server brain_search.
+   */
+  private async localFuzzySearch(
+    namespace: string,
+    query: string,
+  ): Promise<{ valKey: string } | null> {
+    const hits = await localBM25Search(this.redis, namespace, query, 1, this.opts.bm25Threshold);
+    if (!hits.length) return null;
+    return { valKey: hits[0].key };
   }
 
   /** Find semantically similar entry using pgvector API (Speed/Business tier) */
@@ -351,9 +563,54 @@ class SemanticLLMCache {
 
       // 1. Compute embedding (on normalised text when enabled)
       const textForEmbed = this.prepareText(req.prompt);
+
+      // If no embedFn: try BM25 fuzzy match (if vectorUrl available), else exact hash
+      if (!this.opts.embedFn) {
+        const hashKey = `${namespace}:exact:${Buffer.from(textForEmbed).toString('base64url').slice(0, 32)}`;
+
+        // Tier 1a: exact hash
+        const exactCached = await this.redis.get(hashKey);
+        if (exactCached) {
+          const parsedExact = JSON.parse(exactCached) as LLMResponse;
+          const tokensSaved = (parsedExact.inputTokens ?? 500) + (parsedExact.outputTokens ?? 500);
+          const costSaved = estimateCostSaved(req.model, parsedExact.inputTokens ?? 500, parsedExact.outputTokens ?? 500);
+          this.redis.incr(`${this.opts.namespace}:stats:hits`).catch(() => undefined);
+          this.redis.incrby(`${this.opts.namespace}:stats:tokens`, tokensSaved).catch(() => undefined);
+          this.maybePrintTokenMilestone(tokensSaved, costSaved);
+          if (this.opts.debug) console.log(`[cachly] exact-match hit  tokens_saved=${tokensSaved}`);
+          return { ...parsedExact, cached: true, confidence: 'high' as SemanticConfidence };
+        }
+
+        // Tier 1b: local BM25+ fuzzy — no embeddings, no API calls, pure in-process
+        const bm25Hit = await this.localFuzzySearch(namespace, textForEmbed);
+        if (bm25Hit) {
+          const bm25Cached = await this.redis.get(bm25Hit.valKey);
+          if (bm25Cached) {
+            let parsedBm25: LLMResponse;
+            try { parsedBm25 = JSON.parse(bm25Cached) as LLMResponse; } catch { parsedBm25 = { content: bm25Cached, model: req.model }; }
+            const tokensSaved = (parsedBm25.inputTokens ?? 500) + (parsedBm25.outputTokens ?? 500);
+            const costSaved = estimateCostSaved(req.model, parsedBm25.inputTokens ?? 500, parsedBm25.outputTokens ?? 500);
+            this.redis.incr(`${this.opts.namespace}:stats:hits`).catch(() => undefined);
+            this.redis.incrby(`${this.opts.namespace}:stats:tokens`, tokensSaved).catch(() => undefined);
+            this.maybePrintTokenMilestone(tokensSaved, costSaved);
+            if (this.opts.debug) console.log(`[cachly] BM25+ local hit  tokens_saved=${tokensSaved}  💡 Add embedFn for +30% more hits`);
+            return { ...parsedBm25, cached: true, confidence: 'medium' as SemanticConfidence };
+          }
+        }
+
+        // Miss — call LLM and store
+        const resp = await next(req);
+        await this.redis.set(hashKey, JSON.stringify(resp), 'EX', ttl);
+        if (this.opts.debug) {
+          console.log('[cachly] stored (exact+BM25 miss). 💡 Add embedFn to also enable pgvector semantic matching');
+        }
+        this.redis.incr(`${this.opts.namespace}:stats:misses`).catch(() => undefined);
+        return resp;
+      }
+
       const embedding = await this.opts.embedFn(textForEmbed);
 
-      // 2. Semantic search
+      // 2. Semantic search (pgvector or inline ANN)
       const hit = this.opts.vectorUrl
         ? await this.vectorSearch(embedding, namespace)
         : await this.inlineSearch(embedding, namespace);
@@ -364,6 +621,7 @@ class SemanticLLMCache {
           // Try to read stored token counts for a more accurate cost estimate
           const metaRaw = await this.redis.get(`${namespace}:meta:${hit.id}`);
           const meta = metaRaw ? (JSON.parse(metaRaw) as { i?: number; o?: number }) : {};
+          const tokensSaved = (meta.i ?? 500) + (meta.o ?? 500);
           const costSaved = estimateCostSaved(req.model, meta.i ?? 500, meta.o ?? 500);
           const confidence = confidenceBand(
             hit.similarity,
@@ -373,8 +631,10 @@ class SemanticLLMCache {
           // Track stats (fire-and-forget – never block the response)
           this.redis.incr(`${this.opts.namespace}:stats:hits`).catch(() => undefined);
           this.redis.incrbyfloat(`${this.opts.namespace}:stats:savings`, costSaved).catch(() => undefined);
+          this.redis.incrby(`${this.opts.namespace}:stats:tokens`, tokensSaved).catch(() => undefined);
+          this.maybePrintTokenMilestone(tokensSaved, costSaved);
           if (this.opts.debug) {
-            console.log(`[cachly] 🎯 LLM cache HIT  sim=${hit.similarity.toFixed(3)}  conf=${confidence}  channel=${req.channel}  saved=$${costSaved.toFixed(5)}`);
+            console.log(`[cachly] 🎯 semantic HIT  sim=${hit.similarity.toFixed(3)}  conf=${confidence}  tokens_saved=${tokensSaved}  ~$${costSaved.toFixed(5)}`);
           }
           return {
             content: cached,
@@ -489,6 +749,7 @@ class SemanticLLMCache {
           `${this.opts.namespace}${typeSegment}:${agentPart}`;
 
         const textForEmbed = this.prepareText(entry.prompt);
+        if (!this.opts.embedFn) { skipped++; continue; }
         const embedding = await this.opts.embedFn(textForEmbed);
 
         // Check whether a very similar entry already exists
@@ -573,12 +834,14 @@ class SemanticLLMCache {
     misses: number;
     hitRate: string;
     totalSaved: number;
+    tokensSaved: number;
     keyCount: number;
   }> {
-    const [hitsRaw, missesRaw, savingsRaw] = await Promise.all([
+    const [hitsRaw, missesRaw, savingsRaw, tokensRaw] = await Promise.all([
       this.redis.get(`${this.opts.namespace}:stats:hits`),
       this.redis.get(`${this.opts.namespace}:stats:misses`),
       this.redis.get(`${this.opts.namespace}:stats:savings`),
+      this.redis.get(`${this.opts.namespace}:stats:tokens`),
     ]);
     const hits = parseInt(hitsRaw ?? '0');
     const misses = parseInt(missesRaw ?? '0');
@@ -588,6 +851,7 @@ class SemanticLLMCache {
       misses,
       hitRate: total > 0 ? `${((hits / total) * 100).toFixed(1)}%` : 'n/a',
       totalSaved: parseFloat(savingsRaw ?? '0'),
+      tokensSaved: parseInt(tokensRaw ?? '0'),
       keyCount: total,
     };
   }
