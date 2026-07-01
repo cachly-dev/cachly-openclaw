@@ -63,7 +63,7 @@
     "semantic-search"
   ],
   "dependencies": {
-    "ioredis": "^5.4.1"
+    "ioredis": "^5.11.1"
   },
   "peerDependencies": {
     "openclaw": ">=2026.1.0"
@@ -75,8 +75,10 @@
   },
   "devDependencies": {
     "@types/node": "^22",
+    "postcss": "^8.5.16",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vite": "^6.4.3",
+    "vitest": "^3.2.6"
   },
   "engines": {
     "node": ">=22.14.0"

@@ -212,6 +212,10 @@ const answer = await cache.getOrSet(
 
 ## 🦾 OpenClaw adapter (bonus)
 
+OpenClaw exposes a library bridge subset of the Cachly Brain surface. The generated
+parity view is kept in [`../../docs/generated/surface-parity.md`](../../docs/generated/surface-parity.md),
+so this SDK does not need to manually mirror every MCP tool.
+
 If you use [OpenClaw](https://openclaw.dev) (22-channel AI assistant), one function wires everything:
 
 ```typescript
@@ -293,12 +297,12 @@ class CachlyBrainMemory(BaseMemory):
     def load_memory_variables(self, inputs: dict) -> dict:
         query = inputs.get("input", "")
         r = requests.post(
-            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/smart-recall",
+            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/recall",
             headers=HEADERS,
-            json={"query": query, "topK": 3},
+            json={"focus": query, "source": "langchain"},
         )
-        lessons = r.json().get("results", [])
-        context = "\n".join(f"- {l['whatWorked']}" for l in lessons if l.get("whatWorked"))
+        lessons = r.json().get("top_lessons", [])
+        context = "\n".join(f"- {l['what_worked']}" for l in lessons if l.get("what_worked"))
         return {"brain_context": context or "No relevant memory found."}
 
     def save_context(self, inputs: dict, outputs: dict) -> None:
@@ -306,9 +310,9 @@ class CachlyBrainMemory(BaseMemory):
         output = outputs.get("output", "")
         if output:
             requests.post(
-                f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/learn",
+                f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/learn",
                 headers=HEADERS,
-                json={"topic": "agent:langchain", "outcome": "success", "whatWorked": output[:500]},
+                json={"topic": "agent:langchain", "outcome": "success", "what_worked": output[:500]},
             )
 
     def clear(self):
@@ -351,14 +355,14 @@ class CachlyRecallTool(BaseTool):
 
     def _run(self, query: str) -> str:
         r = requests.post(
-            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/smart-recall",
+            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/recall",
             headers={**HEADERS, "Content-Type": "application/json"},
-            json={"query": query, "topK": 5},
+            json={"focus": query, "source": "crewai"},
         )
-        results = r.json().get("results", [])
+        results = r.json().get("top_lessons", [])
         if not results:
             return "No relevant memory found."
-        return "\n".join(f"[{l['topic']}] {l['whatWorked']}" for l in results)
+        return "\n".join(f"[{l['topic']}] {l['what_worked']}" for l in results)
 
 class LearnInput(BaseModel):
     topic: str = Field(description="Category slug like 'deploy:api' or 'fix:auth'")
@@ -372,9 +376,9 @@ class CachlyLearnTool(BaseTool):
 
     def _run(self, topic: str, what_worked: str, outcome: str = "success") -> str:
         requests.post(
-            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/learn",
+            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/learn",
             headers={**HEADERS, "Content-Type": "application/json"},
-            json={"topic": topic, "outcome": outcome, "whatWorked": what_worked},
+            json={"topic": topic, "outcome": outcome, "what_worked": what_worked},
         )
         return f"✅ Stored lesson: {topic}"
 
@@ -404,17 +408,17 @@ HEADERS = {"Authorization": f"Bearer {CACHLY_JWT}", "Content-Type": "application
 def recall_brain(query: str) -> str:
     """Search Cachly Brain for relevant memory."""
     r = requests.post(
-        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/smart-recall",
-        headers=HEADERS, json={"query": query, "topK": 5},
+        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/recall",
+        headers=HEADERS, json={"focus": query, "source": "autogen"},
     )
-    results = r.json().get("results", [])
-    return "\n".join(f"• [{l['topic']}] {l['whatWorked']}" for l in results) or "No memory found."
+    results = r.json().get("top_lessons", [])
+    return "\n".join(f"• [{l['topic']}] {l['what_worked']}" for l in results) or "No memory found."
 
 def store_lesson(topic: str, what_worked: str, outcome: str = "success") -> str:
     """Store a lesson in Cachly Brain."""
     requests.post(
-        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/learn",
-        headers=HEADERS, json={"topic": topic, "outcome": outcome, "whatWorked": what_worked},
+        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/learn",
+        headers=HEADERS, json={"topic": topic, "outcome": outcome, "what_worked": what_worked},
     )
     return f"Stored: {topic}"
 
@@ -449,21 +453,21 @@ class CachlyMemory(BaseMemory):
 
     def get(self, input: str, **kwargs) -> list[TextNode]:
         r = requests.post(
-            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/smart-recall",
-            headers=HEADERS, json={"query": input, "topK": 5},
+            f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/recall",
+            headers=HEADERS, json={"focus": input, "source": "llamaindex"},
         )
         return [
-            TextNode(text=f"[{l['topic']}] {l.get('whatWorked', '')}")
-            for l in r.json().get("results", [])
+            TextNode(text=f"[{l['topic']}] {l.get('what_worked', '')}")
+            for l in r.json().get("top_lessons", [])
         ]
 
     def put(self, messages) -> None:
         for msg in messages:
             if hasattr(msg, "content") and msg.content:
                 requests.post(
-                    f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/brain/learn",
+                    f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/learn",
                     headers=HEADERS,
-                    json={"topic": "agent:llamaindex", "outcome": "success", "whatWorked": str(msg.content)[:500]},
+                    json={"topic": "agent:llamaindex", "outcome": "success", "what_worked": str(msg.content)[:500]},
                 )
 
     def reset(self) -> None:
@@ -486,34 +490,41 @@ response = chat_engine.chat("How did we fix the last deployment issue?")
 Skip expensive LLM calls for semantically similar prompts — no embeddings needed on your side:
 
 ```python
-import os, hashlib, requests
+import os, uuid, requests
 
 CACHLY_URL = os.environ["CACHLY_URL"]
 CACHLY_JWT = os.environ["CACHLY_JWT"]
 INSTANCE_ID = os.environ["CACHLY_BRAIN_INSTANCE_ID"]
+CACHLY_VECTOR_URL = os.environ["CACHLY_VECTOR_URL"].rstrip("/")
 HEADERS = {"Authorization": f"Bearer {CACHLY_JWT}", "Content-Type": "application/json"}
 
 def cached_llm_call(prompt: str, llm_fn, namespace: str = "cachly:sem:qa") -> str:
     """Call LLM with semantic caching via Cachly."""
     # 1. Check semantic cache
     r = requests.post(
-        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/cache/semantic-search",
-        headers=HEADERS,
-        json={"query": prompt, "namespace": namespace, "threshold": 0.85},
+        f"{CACHLY_VECTOR_URL}/search",
+        headers={"Content-Type": "application/json"},
+        json={"prompt": prompt, "hybrid": True, "namespace": namespace, "threshold": 0.85},
     )
-    hit = r.json().get("hit")
-    if hit:
-        return hit["value"]  # Cache hit — no LLM call needed 🎉
+    hit = r.json()
+    if hit.get("found"):
+        entries = requests.get(
+            f"{CACHLY_VECTOR_URL}/entries",
+            params={"namespace": namespace, "limit": 1000},
+        ).json().get("data", [])
+        cached = next((entry for entry in entries if entry.get("id") == hit.get("id")), None)
+        if cached:
+            return cached["prompt"]  # Cache hit — no LLM call needed
 
     # 2. Cache miss — call LLM
     response = llm_fn(prompt)
 
     # 3. Store in semantic cache
-    key = hashlib.sha256(prompt.encode()).hexdigest()[:16]
+    key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{namespace}:{prompt}"))
     requests.post(
-        f"{CACHLY_URL}/api/v1/instances/{INSTANCE_ID}/cache/semantic",
-        headers=HEADERS,
-        json={"key": key, "value": response, "namespace": namespace, "prompt": prompt},
+        f"{CACHLY_VECTOR_URL}/entries",
+        headers={"Content-Type": "application/json"},
+        json={"id": key, "prompt": response, "namespace": namespace},
     )
     return response
 
@@ -549,7 +560,7 @@ Get your free instance at **[cachly.dev/setup-ai](https://cachly.dev/setup-ai)**
 
 - 📖 [cachly.dev docs](https://cachly.dev/docs)
 - 🧠 [AI Memory / MCP Server](https://cachly.dev/docs/ai-memory)
-- 📦 [`@cachly-dev/mcp-server`](https://www.npmjs.com/package/@cachly-dev/mcp-server) — give your AI editor persistent memory (51 MCP tools)
+- 📦 [`@cachly-dev/mcp-server`](https://www.npmjs.com/package/@cachly-dev/mcp-server) — give your AI editor persistent memory (140 MCP tools)
 - 🤖 [OpenClaw](https://openclaw.dev)
 - 📦 [npm](https://www.npmjs.com/package/@cachly-dev/openclaw)
 - 🐛 [Issues](https://github.com/cachly-dev/cachly/issues)
