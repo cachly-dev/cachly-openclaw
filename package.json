@@ -1,6 +1,6 @@
 {
   "name": "@cachly-dev/openclaw",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Cut LLM API costs 60–90% in 3 lines of code. Semantic cache with BM25+ fuzzy matching, persistent sessions, AI memory adapter. Works with OpenAI, Anthropic, LangChain, Vercel AI SDK. No embeddings required for basic caching.",
   "type": "module",
   "main": "./dist/index.js",

@@ -27,6 +27,9 @@ export type { LLMMiddleware, LLMRequest, LLMResponse, SemanticLLMCacheOptions, E
 export { createCachlyMemoryAdapter } from './memory-adapter.js';
 export type { IMemoryStorage, MemoryEntry, MemorySearchResult, CachlyMemoryAdapterOptions } from './memory-adapter.js';
 
+export { createAmbientRecall, isTrivialPrompt, selectMemories, formatMemoryBlock } from './ambient-recall.js';
+export type { AmbientRecallOptions, AmbientRecallStats, AmbientRecallMiddleware } from './ambient-recall.js';
+
 // ── Brain Search (BM25+) ─────────────────────────────────────────────────────
 
 /**

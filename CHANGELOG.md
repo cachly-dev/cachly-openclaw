@@ -7,6 +7,19 @@
 
 ---
 
+## [0.4.0] – 2026-07-08
+
+### Added
+
+- **Ambient Recall middleware** (`createAmbientRecall`) — push-based memory,
+  Phase-4 parity with Claude Code: runs before every model call, recalls
+  relevant memories through the cachly relevance gate (trivial-skip,
+  similarity + importance floor, top-K, hard per-turn token budget) and
+  prepends the gated hits to the system prompt. No more "the agent forgot to
+  search its memory". Fail-safe: any backend error falls through to the
+  unmodified request. Exposes `stats()` (turns, trivial skips, injections,
+  injected tokens) for honest cost accounting.
+
 ## [0.3.1] – 2026-06-09
 
 ### Fixed
