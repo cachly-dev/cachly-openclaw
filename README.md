@@ -560,7 +560,7 @@ Get your free instance at **[cachly.dev/setup-ai](https://cachly.dev/setup-ai)**
 
 - 📖 [cachly.dev docs](https://cachly.dev/docs)
 - 🧠 [AI Memory / MCP Server](https://cachly.dev/docs/ai-memory)
-- 📦 [`@cachly-dev/mcp-server`](https://www.npmjs.com/package/@cachly-dev/mcp-server) — give your AI editor persistent memory (126 MCP tools)
+- 📦 [`@cachly-dev/mcp-server`](https://www.npmjs.com/package/@cachly-dev/mcp-server) — give your AI editor persistent memory (140 MCP tools)
 - 🤖 [OpenClaw](https://openclaw.dev)
 - 📦 [npm](https://www.npmjs.com/package/@cachly-dev/openclaw)
 - 🐛 [Issues](https://github.com/cachly-dev/cachly/issues)
