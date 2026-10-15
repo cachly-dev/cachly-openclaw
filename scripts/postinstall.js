@@ -26,6 +26,6 @@ ${line}
 
   ${c.dim}───────────────────────────────────────────────────────${c.reset}
   ${c.yellow}🧠 Also give your AI editor permanent memory:${c.reset}
-  ${c.cyan}npx @cachly-dev/init${c.reset}   ${c.dim}Claude Code · Cursor · Copilot · Windsurf${c.reset}
+  ${c.cyan}npx @cachly-dev/mcp-server autopilot${c.reset}   ${c.dim}Claude Code · Cursor · Copilot · Windsurf${c.reset}
 
 ${line}`);
