@@ -56,6 +56,10 @@ export interface BrainLesson {
   recallCount?: number;
   confidence?: number;     // 0–1
   storedAt?: string;       // ISO timestamp
+  /** ISO timestamp until which the lesson was current (set when another one replaced it). */
+  validUntil?: string;
+  /** Topic of the lesson that replaced this one. */
+  replacedBy?: string;
 }
 
 export interface BrainRecallResult {
@@ -106,6 +110,29 @@ interface LessonJSON {
   recall_count?: number;
   confidence?: number;
   ts?: string;
+  // Written by the MCP server; read here, never dropped on learn().
+  visibility?: string;
+  group?: string;
+  gilt_bis?: string;
+  ersetzt_durch?: string;
+  audit_trail?: unknown[];
+  [field: string]: unknown;
+}
+
+/**
+ * Same rule as the MCP server: a private lesson is only for an exact
+ * recall_best_solution, a group-scoped one only for that group. The adapter
+ * knows no requester, so it shows neither.
+ */
+function maySurface(j: LessonJSON): boolean {
+  return j.visibility !== 'private' && !j.group;
+}
+
+/** Date (YYYY-MM-DD) a lesson stopped being current, else undefined. */
+function outdatedSince(l: BrainLesson): string | undefined {
+  if (!l.validUntil) return undefined;
+  const t = Date.parse(l.validUntil);
+  return Number.isFinite(t) && t < Date.now() ? l.validUntil.slice(0, 10) : undefined;
 }
 
 function toLesson(j: LessonJSON): BrainLesson {
@@ -121,6 +148,8 @@ function toLesson(j: LessonJSON): BrainLesson {
     recallCount: j.recall_count,
     confidence: j.confidence,
     storedAt: j.ts,
+    validUntil: j.gilt_bis,
+    replacedBy: j.ersetzt_durch,
   };
 }
 
@@ -211,7 +240,8 @@ class CachlyBrain {
         for (const raw of raws) {
           if (!raw) continue;
           try {
-            out.push(toLesson(JSON.parse(raw) as LessonJSON));
+            const j = JSON.parse(raw) as LessonJSON;
+            if (maySurface(j)) out.push(toLesson(j));
           } catch {
             /* skip malformed */
           }
@@ -252,7 +282,12 @@ class CachlyBrain {
       scored.push({ lesson, score });
     }
     scored.sort((a, b) => b.score - a.score);
-    const top = scored.slice(0, topK);
+    // A replaced lesson gives way when its successor is among the hits (as in
+    // the MCP server's smart_recall); otherwise it stays and the briefing marks
+    // it as outdated.
+    const topics = new Set(scored.map((s) => s.lesson.topic));
+    const current = scored.filter((s) => !s.lesson.replacedBy || !topics.has(s.lesson.replacedBy));
+    const top = current.slice(0, topK);
 
     // Bump recall_count on the lessons we surfaced.
     await Promise.all(
@@ -284,6 +319,19 @@ class CachlyBrain {
     const key = this.bestKey(input.topic);
     const now = new Date().toISOString();
     const existingRaw = await this.redis.get(key);
+
+    // The stored record as it is: fields this adapter does not manage (context,
+    // author, source, visibility, audit_trail, … from the MCP server) stay.
+    // Until 0.5.0 learn() wrote only its own fields back (docs/spec/lesson-record.json).
+    let prevRaw: Record<string, unknown> = {};
+    if (existingRaw) {
+      try {
+        const p = JSON.parse(existingRaw) as unknown;
+        if (p && typeof p === 'object' && !Array.isArray(p)) prevRaw = p as Record<string, unknown>;
+      } catch {
+        /* unreadable — start fresh */
+      }
+    }
 
     let lesson: BrainLesson;
     if (existingRaw) {
@@ -330,7 +378,13 @@ class CachlyBrain {
       };
     }
 
-    await this.redis.set(key, JSON.stringify(toJSON(lesson)));
+    // Spread order: our fields win; an `undefined` (dropped guidance on a flip)
+    // removes the key, because JSON.stringify skips it.
+    const record: Record<string, unknown> = { ...prevRaw, ...toJSON(lesson) };
+    if (Array.isArray(prevRaw.audit_trail)) {
+      record.audit_trail = [...prevRaw.audit_trail, { ts: now, action: 'updated', via: '@cachly-dev/openclaw' }];
+    }
+    await this.redis.set(key, JSON.stringify(record));
     this.log(`learn "${input.topic}" (${input.outcome}) → conf ${lesson.confidence?.toFixed(2)}`);
     return lesson;
   }
@@ -345,7 +399,11 @@ class CachlyBrain {
       // Failures are anti-patterns, not instructions — frame them as such so the
       // assistant avoids the dead end instead of "applying" it.
       const prefix = success ? '' : 'AVOID — ';
-      return `- ${mark} ${lesson.topic}: ${prefix}${body ?? lesson.outcome}`;
+      const since = outdatedSince(lesson);
+      const topic = since
+        ? `${lesson.topic} (outdated since ${since}${lesson.replacedBy ? `, replaced by ${lesson.replacedBy}` : ''})`
+        : lesson.topic;
+      return `- ${mark} ${topic}: ${prefix}${body ?? lesson.outcome}`;
     });
     return [
       'Relevant lessons your Brain has already learned (apply the ✅, avoid the ⚠️ — do not relearn):',

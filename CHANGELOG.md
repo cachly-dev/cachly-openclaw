@@ -7,6 +7,28 @@
 
 ---
 
+## [0.5.0] – 2026-10-16
+
+The Brain adapter now reads and writes lessons the way the cachly MCP server
+does. Both share the record `cachly:lesson:best:<topic>`; the contract is
+`docs/spec/lesson-record.json` in the monorepo.
+
+### Fixed
+
+- **`learn()` no longer drops fields it does not manage.** Reinforcing a lesson
+  the MCP server had created wrote back only the adapter's own fields, so
+  `context`, `author`, `source`, `visibility`, `audit_trail` and `version` were
+  gone. The stored record is now kept, and an existing `audit_trail` gets an
+  entry `{ ts, action: 'updated', via: '@cachly-dev/openclaw' }`.
+- **`recall()` no longer shows private or group-scoped lessons.** A lesson with
+  `visibility: 'private'` or a `group` is skipped, as in the MCP server's
+  `smart_recall` (the adapter knows no requester).
+- **Replaced lessons give way.** A lesson with `ersetzt_durch` drops out when its
+  successor is among the hits. Without the successor it stays, and
+  `formatBriefing()` marks it `(outdated since <date>, replaced by <topic>)`.
+
+---
+
 ## [0.4.0] – 2026-07-08
 
 ### Added
