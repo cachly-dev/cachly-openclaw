@@ -1,0 +1,5 @@
+# Wird in den oeffentlichen Spiegel cachly-openclaw kopiert und haelt dort
+# node_modules draussen. NICHT dist/ eintragen: package.json hat kein
+# "files"-Feld, npm nimmt diese Datei dann als Packliste — dist/ fehlte
+# im veroeffentlichten Paket.
+node_modules/
