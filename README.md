@@ -255,7 +255,7 @@ await brain.sessionStart()
 // → "💡 alice solved deploy:k8s 1d ago: ..."
 ```
 
-Team plans from €99/mo (10 seats) at [cachly.dev/teams](https://cachly.dev/teams).
+Team Brains from €49/month (up to 5 people) at [cachly.dev/teams](https://cachly.dev/teams). Organisations are free.
 
 ---
 
@@ -265,7 +265,7 @@ Team plans from €99/mo (10 seats) at [cachly.dev/teams](https://cachly.dev/tea
 |-------|-------------|-------|
 | **Free — Exact + BM25** | 20–50% reduction, in-process BM25+ fuzzy, zero config | `CACHLY_URL` only |
 | **Free — Semantic cache** | 60–90% cost reduction | + `embedFn` |
-| **Speed tier** | Hosted pgvector, higher hit rates at scale | Speed plan at cachly.dev |
+| **Solo, Team, Business** | More semantic-cache entries and requests per plan | [cachly.dev/pricing](https://cachly.dev/pricing) |
 | **Team Brain** | Shared knowledge, team lessons, analytics | cachly.dev/teams |
 
 ---
@@ -563,7 +563,7 @@ Get your free instance at **[cachly.dev/setup-ai](https://cachly.dev/setup-ai)**
 - 📦 [`@cachly-dev/mcp-server`](https://www.npmjs.com/package/@cachly-dev/mcp-server) — give your AI editor persistent memory
 - 🤖 [OpenClaw](https://openclaw.dev)
 - 📦 [npm](https://www.npmjs.com/package/@cachly-dev/openclaw)
-- 🐛 [Issues](https://github.com/cachly-dev/cachly/issues)
+- 🐛 [Issues](https://github.com/cachly-dev/cachly-openclaw/issues)
 
 ---
 
