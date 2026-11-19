@@ -56,11 +56,11 @@ const answer = await cache.getOrSet(
 )
 ```
 
-**Without an embed function + no vectorUrl:** exact-match caching + **local BM25+ fuzzy search** kick in immediately (20–50% savings). No API calls. "how do I reset password?" matches "password reset help" — pure in-process.
+**Without an embed function + no vectorUrl:** exact-match caching + **local BM25+ fuzzy search** kick in immediately (no API calls). "how do I reset password?" matches "password reset help" — pure in-process.
 
 **Without an embed function + vectorUrl:** BM25 + hosted pgvector index, higher hit rates across large caches.
 
-**Add semantic matching** for 60–90% savings (10 more lines):
+**Add semantic matching** by meaning (10 more lines):
 
 ```typescript
 const cache = createSemanticLLMCache({
@@ -78,14 +78,7 @@ const cache = createSemanticLLMCache({
 
 ---
 
-## 📊 What you save
-
-| Questions/day | Cache hit rate | Monthly saving (GPT-4o) |
-|---------------|---------------|------------------------|
-| 100           | 40% exact     | ~$8                    |
-| 100           | 70% semantic  | ~$22                   |
-| 1 000         | 70% semantic  | ~$220                  |
-| 10 000        | 70% semantic  | ~$2 200                |
+## 📊 What you see
 
 After 10 cache hits, the console logs:
 ```
@@ -263,8 +256,8 @@ Team Brains from €49/month (up to 5 people) at [cachly.dev/teams](https://cach
 
 | Level | What you get | Setup |
 |-------|-------------|-------|
-| **Free — Exact + BM25** | 20–50% reduction, in-process BM25+ fuzzy, zero config | `CACHLY_URL` only |
-| **Free — Semantic cache** | 60–90% cost reduction | + `embedFn` |
+| **Free — Exact + BM25** | In-process BM25+ fuzzy matching, zero config | `CACHLY_URL` only |
+| **Free — Semantic cache** | Semantic matching by meaning | + `embedFn` |
 | **Solo, Team, Business** | More semantic-cache entries and requests per plan | [cachly.dev/pricing](https://cachly.dev/pricing) |
 | **Team Brain** | Shared knowledge, team lessons, analytics | cachly.dev/teams |
 

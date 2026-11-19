@@ -1,7 +1,7 @@
 {
   "name": "@cachly-dev/openclaw",
-  "version": "0.5.0",
-  "description": "Cut LLM API costs 60–90% in 3 lines of code. Semantic cache with BM25+ fuzzy matching, persistent sessions, AI memory adapter. Works with OpenAI, Anthropic, LangChain, Vercel AI SDK. No embeddings required for basic caching.",
+  "version": "0.5.1",
+  "description": "cachly client for Node.js: semantic LLM cache, persistent sessions and a Brain adapter (lessons, recall) for OpenAI, Anthropic, LangChain and Vercel AI SDK. Servers in Germany (EU).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -40,8 +40,6 @@
     "semantic-cache",
     "ai-cache",
     "openai-cache",
-    "llm-cost",
-    "token-savings",
     "bm25",
     "vector-cache",
     "session-store",
